@@ -1,15 +1,14 @@
 // Copyright (c) 2012-2019 K Team. All Rights Reserved.
 package org.kframework.utils.errorsystem;
 
+import org.kframework.attributes.HasLocation;
 import org.kframework.attributes.Location;
 import org.kframework.attributes.Source;
 
 import java.io.Serializable;
-import java.util.Formatter;
-import java.util.HashMap;
-import java.util.Map;
+import java.util.*;
 
-public class KException implements Serializable {
+public class KException implements Serializable, HasLocation {
     protected final ExceptionType type;
     final KExceptionGroup exceptionGroup;
     private final Source source;
@@ -68,6 +67,35 @@ public class KException implements Serializable {
         this.exception = exception;
     }
 
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        KException that = (KException) o;
+        return type == that.type &&
+                exceptionGroup == that.exceptionGroup &&
+                Objects.equals(source, that.source) &&
+                Objects.equals(location, that.location) &&
+                Objects.equals(message, that.message) &&
+                Objects.equals(exception, that.exception) &&
+                Objects.equals(trace.toString(), that.trace.toString());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(type, exceptionGroup, source, location, message, exception, trace.toString());
+    }
+
+    @Override
+    public Optional<Location> location() {
+        return Optional.of(location);
+    }
+
+    @Override
+    public Optional<Source> source() {
+        return Optional.of(source);
+    }
+
     public enum KExceptionGroup {
         OUTER_PARSER, INNER_PARSER, COMPILER, LISTS, INTERNAL, CRITICAL, DEBUGGER
     }
@@ -83,7 +111,7 @@ public class KException implements Serializable {
 
     public String toString(boolean verbose) {
         return "[" + types.get(type) + "] " + labels.get(exceptionGroup) + ": " + message
-                + (exception == null ? "" : " (" + exception.getMessage() + ")")
+                + (exception == null ? "" : " (" + exception.getClass().getSimpleName() + ": " + exception.getMessage() + ")")
                 + trace.toString() + traceTail()
                 + (source == null ? "" : "\n\t" + source)
                 + (location == null ? "" : "\n\t" + location);

@@ -85,7 +85,8 @@ public class GlobalContext implements Serializable {
         this.stateLog = new StateLog(javaExecutionOptions, files, prettyPrinter);
         this.constraintOps = new SMTOperations(() -> def, smtOptions,
                 new Z3Wrapper(smtOptions, kem, javaExecutionOptions, files, stateLog, this), kem, javaExecutionOptions);
-        this.kItemOps = new KItemOperations(stage, javaExecutionOptions.deterministicFunctions, kem, this::builtins, globalOptions);
+        this.kItemOps = new KItemOperations(stage, javaExecutionOptions.deterministicFunctions,
+                kem, this::builtins, globalOptions);
         this.stage = stage;
         this.profiler = profiler;
 
@@ -128,6 +129,13 @@ public class GlobalContext implements Serializable {
 
     public IndentingFormatter log() {
         return log;
+    }
+
+    public void newLogIndent(int indentLevel) {
+        if (!javaExecutionOptions.logRulesPublic) {
+            return;
+        }
+        newLogIndent(KItemLog.indent(indentLevel));
     }
 
     public void newLogIndent(String indent) {

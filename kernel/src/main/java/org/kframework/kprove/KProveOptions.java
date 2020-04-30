@@ -9,6 +9,7 @@ import org.kframework.main.GlobalOptions;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.file.FileUtil;
 import org.kframework.utils.inject.RequestScoped;
+import org.kframework.utils.options.BackendOptions;
 import org.kframework.utils.options.DefinitionLoadingOptions;
 import org.kframework.utils.options.SMTOptions;
 
@@ -41,6 +42,9 @@ public class KProveOptions {
     }
 
     @ParametersDelegate
+    public BackendOptions backend = new BackendOptions();
+
+    @ParametersDelegate
     public SMTOptions smt = new SMTOptions();
 
     @ParametersDelegate
@@ -62,4 +66,8 @@ public class KProveOptions {
             "Otherwise it fails on the present path. If option is not specified, full target term implication is checked " +
             "on every step. In most specifications boundary is marked by \"k\".")
     public List<String> boundaryCells = Collections.emptyList();
+
+    @Parameter(names="--concrete-rules", description="List of rule labels to be considered concrete, in addition to " +
+            "rules marked with `[concrete]` attribute")
+    public List<String> extraConcreteRuleLabels = Collections.emptyList();
 }

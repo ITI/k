@@ -3,16 +3,14 @@ package org.kframework.compile;
 
 import org.apache.commons.lang3.mutable.MutableBoolean;
 import org.kframework.Collections;
+import org.kframework.attributes.Att;
 import org.kframework.builtin.BooleanUtils;
-import org.kframework.builtin.KLabels;
 import org.kframework.builtin.Sorts;
-import org.kframework.definition.Definition;
 import org.kframework.definition.Module;
 import org.kframework.definition.NonTerminal;
 import org.kframework.definition.Production;
 import org.kframework.definition.Rule;
 import org.kframework.definition.Sentence;
-import org.kframework.kil.Attribute;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
 import org.kframework.kore.KLabel;
@@ -55,7 +53,7 @@ public class GenerateSortPredicateRules {
     public Module gen(Module mod) {
         this.mod = mod;
         predicateRules = stream(mod.rules()).filter(this::isPredicate).collect(Collectors.toSet());
-        return Module(mod.name(), mod.imports(), (Set<Sentence>) mod.localSentences().$bar(stream(mod.definedSorts())
+        return Module(mod.name(), mod.imports(), (Set<Sentence>) mod.localSentences().$bar(stream(mod.allSorts())
                 .flatMap(this::gen).collect(Collections.toSet())), mod.att());
     }
 
@@ -69,15 +67,15 @@ public class GenerateSortPredicateRules {
         List<Sentence> res = new ArrayList<>();
         Production prod = Production(KLabel("is" + sort.toString()), Sorts.Bool(),
                 Seq(Terminal("is" + sort.toString()), Terminal("("), NonTerminal(Sorts.K()), Terminal(")")),
-                Att().add(Attribute.FUNCTION_KEY).add(Attribute.PREDICATE_KEY, Sort.class, sort));
+                Att().add(Att.FUNCTION()).add(Att.PREDICATE(), Sort.class, sort));
         res.add(prod);
         java.util.Set<Sort> nonProtectingSubsorts = new HashSet<>();
         nonProtectingSubsorts.add(sort);
         // we compute the set of subsorts which protect the parent sort (ie do not add terms to it)
         // in order to optimize away some cases from being checked during sort computation at runtime
-        stream(mod.definedSorts()).filter(s -> mod.subsorts().lessThanEq(s, sort)).forEach(subsort -> {
+        stream(mod.allSorts()).filter(s -> mod.subsorts().lessThanEq(s, sort)).forEach(subsort -> {
             MutableBoolean isProtecting = new MutableBoolean(true);
-            stream(mod.definedSorts()).filter(s -> mod.subsorts().lessThanEq(s, subsort)).forEach(candidateSort -> {
+            stream(mod.allSorts()).filter(s -> mod.subsorts().lessThanEq(s, subsort)).forEach(candidateSort -> {
                 if (predicateRules.stream().filter(r -> isPredicateFor(r, candidateSort)).findAny().isPresent()) {
                     // the subsort has subsorts with predicate rules, so it may have introduced arbitrary terms into the membership
                     isProtecting.setFalse();
@@ -104,7 +102,7 @@ public class GenerateSortPredicateRules {
             }
         });
         stream(mod.productions()).filter(p -> mod.subsorts().lessThanEq(p.sort(), sort)).filter(p -> nonProtectingSubsorts.contains(p.sort())).distinct().forEach(p -> {
-            if (p.klabel().isDefined() && !p.att().contains(Attribute.FUNCTION_KEY)) {
+            if (p.klabel().isDefined() && !p.att().contains(Att.FUNCTION())) {
                 List<K> klist = new ArrayList<>();
                 List<K> side = new ArrayList<>();
                 int i = 0;
@@ -112,7 +110,7 @@ public class GenerateSortPredicateRules {
                 for (NonTerminal nt : nts) {
                     KVariable v = KVariable("K" + i++, Att().add(Sort.class, nt.sort()));
                     klist.add(v);
-                    if (!mutable(mod.sortAttributesFor()).getOrDefault(sort, Att()).contains("flatPredicate")) {
+                    if (!mutable(mod.sortAttributesFor()).getOrDefault(sort.head(), Att()).contains("flatPredicate")) {
                         side.add(KApply(KLabel("is" + nt.sort().toString()), v));
                     }
                 }
@@ -127,7 +125,7 @@ public class GenerateSortPredicateRules {
                 res.add(r);
             }
         });
-        stream(mod.definedSorts()).filter(s -> mod.subsorts().lessThanEq(s, sort)).distinct().forEach(s -> {
+        stream(mod.allSorts()).filter(s -> mod.subsorts().lessThanEq(s, sort)).distinct().forEach(s -> {
             res.add(Rule(KRewrite(KApply(KLabel("is" + sort.toString()), KApply(KLabel("#KToken"), KToken(s.toString(), Sorts.KString()), KVariable("_"))), BooleanUtils.TRUE),
                     BooleanUtils.TRUE,
                     BooleanUtils.TRUE));
@@ -168,12 +166,12 @@ public class GenerateSortPredicateRules {
         Optional<Sort> sort;
         if (r.body() instanceof KApply) {
             topKLabel = ((KApply) r.body()).klabel();
-            sort = mod.attributesFor().apply(topKLabel).getOptional(Attribute.PREDICATE_KEY, Sort.class);
+            sort = mod.attributesFor().apply(topKLabel).getOptional(Att.PREDICATE(), Sort.class);
         } else if (r.body() instanceof KRewrite) {
             KRewrite rw = (KRewrite) r.body();
             if (rw.left() instanceof KApply) {
                 topKLabel = ((KApply) rw.left()).klabel();
-                sort = mod.attributesFor().apply(topKLabel).getOptional(Attribute.PREDICATE_KEY, Sort.class);
+                sort = mod.attributesFor().apply(topKLabel).getOptional(Att.PREDICATE(), Sort.class);
             } else {
                 sort = Optional.empty();
             }

@@ -194,6 +194,7 @@ struct
     | [String s] -> (try Lexer.parse_k s with
       | e -> [KApply1(parse_klabel("#noParse"), [String (Printexc.to_string e)])])
     | _ -> raise Not_implemented
+  let hook_parseKORE _ _ _ _ _ = raise Not_implemented
 end
 
 module KEQUAL =
@@ -247,6 +248,8 @@ struct
   let hook_unlock c _ _ _ _ = match c with
       [Int fd], [Int len] -> unix_error (fun () -> Unix.lockf (Hashtbl.find file_descriptors fd) Unix.F_ULOCK (Z.to_int len); [])
     | _ -> raise Not_implemented
+  let hook_time () _ _ _ _ =
+      [Int (Z.of_float (Unix.time ()))]
 
   let log_files = Hashtbl.create 2
 
@@ -278,6 +281,8 @@ struct
   let flush_logs () =
     Hashtbl.iter flush_log log_files
 
+  let hook_accept _ _ _ _ _ = raise Not_implemented
+  let hook_shutdownWrite _ _ _ _ _ = raise Not_implemented
   let hook_stat _ _ _ _ _ = raise Not_implemented
   let hook_lstat _ _ _ _ _ = raise Not_implemented
   let hook_opendir _ _ _ _ _ = raise Not_implemented
@@ -299,13 +304,13 @@ struct
         | Unix.WSIGNALED n -> (128 + n)
         | Unix.WSTOPPED n -> (128 + n)
       in
-      [KApply3((parse_klabel "#systemResult(_,_,_)_K-IO"), [Int (Z.of_int exit_code)], [String (Buffer.contents buf_out)], [String (Buffer.contents buf_err)])]
+      [KApply3((parse_klabel "#systemResult"), [Int (Z.of_int exit_code)], [String (Buffer.contents buf_out)], [String (Buffer.contents buf_err)])]
     | _ -> raise Not_implemented
   let hook_mkstemp c _ _ _ _ = match c with
-    | [String prefix], [String suffix] -> unix_error (fun () ->
-            unix_error (fun () -> let path, outChannel = Filename.open_temp_file prefix suffix in
+    | [String template] ->
+            unix_error (fun () -> let path, outChannel = Filename.open_temp_file (String.sub template 0 ((String.length template) - 6)) "" in
               let fd_int = !curr_fd in Hashtbl.add file_descriptors fd_int (Unix.descr_of_out_channel outChannel); curr_fd := (Z.add fd_int Z.one);
-              [KApply2((parse_klabel "#tempFile(_,_)_K-IO"), [String path], [Int fd_int])]))
+              [KApply2((parse_klabel "#tempFile"), [String path], [Int fd_int])])
     | _ -> raise Not_implemented
   let hook_remove c _ _ _ _ = match c with
     | [String fname] -> unix_error (fun () -> Unix.unlink fname ; [])
@@ -380,6 +385,15 @@ struct
     | _ -> raise Not_implemented
   let hook_string2bytes c _ _ _ _ = match c with
       [String s] -> [Bytes (Bytes.of_string s)]
+    | _ -> raise Not_implemented
+  let hook_get c _ _ _ _ = match c with
+      [Bytes b], [Int off] ->
+      [Int (Z.of_int (Char.code (Bytes.get b (Z.to_int off))))]
+    | _ -> raise Not_implemented
+  let hook_update c _ _ _ _ = match c with
+      [Bytes b], [Int off], [Int v] ->
+      Bytes.set b (Z.to_int off) (Char.chr (Z.to_int v));
+      [Bytes b]
     | _ -> raise Not_implemented
   let hook_substr c _ _ _ _ = match c with
       [Bytes b], [Int off1], [Int off2] ->

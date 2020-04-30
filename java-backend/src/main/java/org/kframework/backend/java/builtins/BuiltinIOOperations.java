@@ -128,18 +128,21 @@ public class BuiltinIOOperations {
         args[2] = term.stringValue();
         ProcessOutput output = RunProcess.execute(environment, termContext.global().files.getProcessBuilder(), args);
 
-        KLabelConstant klabel = KLabelConstant.of(KORE.KLabel("#systemResult(_,_,_)_K-IO"), termContext.definition());
+        KLabelConstant klabel = KLabelConstant.of(KORE.KLabel("#systemResult"), termContext.definition());
         String stdout = output.stdout != null ? new String(output.stdout) : "";
         String stderr = output.stderr != null ? new String(output.stderr) : "";
         return KItem.of(klabel, KList.concatenate(IntToken.of(output.exitCode),
                 StringToken.of(stdout), StringToken.of(stderr)), termContext.global());
     }
 
-    public static Term mkstemp(StringToken prefix, StringToken suffix, TermContext termContext) throws IOException {
+    public static Term mkstemp(StringToken template, TermContext termContext) throws IOException {
         FileSystem fs = termContext.fileSystem();
         try {
-            File f = File.createTempFile("tmp" + prefix.stringValue(), suffix.stringValue());
-            KLabelConstant klabel = KLabelConstant.of(KORE.KLabel("#tempFile(_,_)_K-IO"), termContext.definition());
+            String[] split = template.stringValue().split("XXXXXX", -1);
+            String prefix = split[0];
+            String suffix = split[1];
+            File f = File.createTempFile("tmp" + prefix, suffix);
+            KLabelConstant klabel = KLabelConstant.of(KORE.KLabel("#tempFile"), termContext.definition());
             return KItem.of(klabel, KList.concatenate(StringToken.of(f.getAbsolutePath()),
                     IntToken.of(fs.open(f, "w"))), termContext.global());
         } catch (IOException e) {

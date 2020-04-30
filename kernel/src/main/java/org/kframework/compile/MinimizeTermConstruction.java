@@ -93,15 +93,26 @@ public class MinimizeTermConstruction {
         new RewriteAwareVisitor(body, new HashSet<>()) {
             @Override
             public void apply(K k) {
-                if (isLHS() && !isRHS() && !(k instanceof KVariable)) {
+                if (isLHS() && !isRHS() && !(k instanceof KVariable) && !atTop) {
                     cache.put(k, newDotVariable(sorts.sort(k, Sorts.K())));
                 }
+                atTop = false;
                 super.apply(k);
+            }
+
+            boolean atTop = false;
+
+            @Override
+            public void apply(KRewrite rew) {
+              if (rew == term) {
+                atTop = true;
+              }
+              super.apply(rew);
             }
 
             @Override
             public void apply(KApply k) {
-                if (k.klabel().equals(KLabels.ML_OR)) {
+                if (k.klabel().head().equals(KLabels.ML_OR)) {
                   return;
                 }
                 String hook = module.attributesFor().get(k.klabel()).getOrElse(() -> Att.empty()).getOptional("hook").orElse("");
@@ -157,7 +168,7 @@ public class MinimizeTermConstruction {
             @Override
             public K apply(KApply k) {
                 boolean stack = inBad;
-                if (k.klabel().equals(KLabels.ML_OR)) {
+                if (k.klabel().head().equals(KLabels.ML_OR)) {
                     inBad = true;
                 }
                 String hook = module.attributesFor().get(k.klabel()).getOrElse(() -> Att.empty()).getOptional("hook").orElse("");

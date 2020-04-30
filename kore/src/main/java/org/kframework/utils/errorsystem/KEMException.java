@@ -4,8 +4,12 @@ package org.kframework.utils.errorsystem;
 import org.kframework.attributes.HasLocation;
 import org.kframework.attributes.Location;
 import org.kframework.attributes.Source;
+import org.kframework.parser.Term;
 import org.kframework.utils.errorsystem.KException.ExceptionType;
 import org.kframework.utils.errorsystem.KException.KExceptionGroup;
+
+import java.util.Objects;
+import java.util.Optional;
 
 /**
  * Thrown to indicate that the K Exception manager has terminated the application due to an error.
@@ -84,8 +88,20 @@ public class KEMException extends RuntimeException {
         return create(ExceptionType.ERROR, KExceptionGroup.INNER_PARSER, message, null, null, null);
     }
 
+    public static KEMException innerParserError(String message, Source source, Location location) {
+        return create(ExceptionType.ERROR, KExceptionGroup.INNER_PARSER, message, null, location, source);
+    }
+
+    public static KEMException innerParserError(String message, Term t) {
+        return create(ExceptionType.ERROR, KExceptionGroup.INNER_PARSER, message, null, t.location().orElse(null), t.source().orElse(null));
+    }
+
     public static KEMException innerParserError(String message, Throwable e, Source source, Location location) {
         return create(ExceptionType.ERROR, KExceptionGroup.INNER_PARSER, message, e, location, source);
+    }
+
+    public static KEMException outerParserError(String message) {
+        return create(ExceptionType.ERROR, KExceptionGroup.OUTER_PARSER, message, null, null, null);
     }
 
     public static KEMException outerParserError(String message, Source source, Location location) {
@@ -109,4 +125,22 @@ public class KEMException extends RuntimeException {
                                        Throwable e, Location location, Source source) {
         return new KEMException(new KException(type, group, message, source, location, e));
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        KEMException that = (KEMException) o;
+        return Objects.equals(exception, that.exception);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(exception);
+    }
+
+    public KException getKException() {
+        return exception;
+    }
+
 }

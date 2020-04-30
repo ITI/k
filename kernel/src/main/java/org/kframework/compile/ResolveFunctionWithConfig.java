@@ -3,7 +3,6 @@ package org.kframework.compile;
 
 import org.kframework.Collections;
 import org.kframework.attributes.Att;
-import org.kframework.builtin.BooleanUtils;
 import org.kframework.builtin.KLabels;
 import org.kframework.builtin.Sorts;
 import org.kframework.definition.Context;
@@ -14,23 +13,16 @@ import org.kframework.definition.Production;
 import org.kframework.definition.ProductionItem;
 import org.kframework.definition.Rule;
 import org.kframework.definition.Sentence;
-import org.kframework.kil.Attribute;
-import org.kframework.kore.InjectedKLabel;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
-import org.kframework.kore.KAs;
 import org.kframework.kore.KLabel;
 import org.kframework.kore.KRewrite;
-import org.kframework.kore.KSequence;
-import org.kframework.kore.KToken;
 import org.kframework.kore.KVariable;
 import org.kframework.kore.Sort;
 import org.kframework.kore.FoldK;
 import org.kframework.kore.TransformK;
-import org.kframework.compile.checks.ComputeUnboundVariables;
 import org.kframework.utils.errorsystem.KEMException;
 
-import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -54,7 +46,7 @@ public class ResolveFunctionWithConfig {
 
     public ResolveFunctionWithConfig(Module mod, boolean kore) {
       ComputeTransitiveFunctionDependencies deps = new ComputeTransitiveFunctionDependencies(mod);
-      Set<KLabel> functions = stream(mod.productions()).filter(p -> p.att().contains(Attribute.FUNCTION_KEY)).map(p -> p.klabel().get()).collect(Collectors.toSet());
+      Set<KLabel> functions = stream(mod.productions()).filter(p -> p.att().contains(Att.FUNCTION())).map(p -> p.klabel().get()).collect(Collectors.toSet());
       withConfigFunctions.addAll(functions.stream().filter(f -> stream(mod.rulesFor().getOrElse(f, () -> Collections.<Rule>Set())).anyMatch(r -> ruleNeedsConfig(r))).collect(Collectors.toSet()));
       withConfigFunctions.addAll(deps.ancestors(withConfigFunctions));
       ConfigurationInfoFromModule info = new ConfigurationInfoFromModule(mod);
@@ -62,7 +54,7 @@ public class ResolveFunctionWithConfig {
         topCell = Sorts.GeneratedTopCell();
         topCellLabel = KLabels.GENERATED_TOP_CELL;
       } else {
-        topCell = info.topCell();
+        topCell = info.getRootCell();
         topCellLabel = info.getCellLabel(topCell);
       }
       CONFIG_VAR = KVariable("_Configuration", Att().add(Sort.class, topCell).add("withConfig"));
@@ -150,7 +142,7 @@ public class ResolveFunctionWithConfig {
             throw KEMException.compilerError("Found term that is not a cell or a function at the top of a rule.", fun);
           }
           KApply funKApp = (KApply)fun;
-          if (!module.attributesFor().apply(funKApp.klabel()).contains(Attribute.FUNCTION_KEY)) {
+          if (!module.attributesFor().apply(funKApp.klabel()).contains(Att.FUNCTION())) {
             throw KEMException.compilerError("Found term that is not a cell or a function at the top of a rule.", fun);
           }
           if (!(cell instanceof KApply)) {
@@ -178,7 +170,7 @@ public class ResolveFunctionWithConfig {
     private Production resolve(Production prod) {
         if (prod.klabel().isDefined() && withConfigFunctions.contains(prod.klabel().get())) {
             List<ProductionItem> pis = Stream.concat(stream(prod.items()), Stream.of(NonTerminal(topCell))).collect(Collections.toList());
-            return Production(prod.klabel(), prod.sort(), pis, prod.att());
+            return Production(prod.klabel(), prod.params(), prod.sort(), pis, prod.att());
         }
         return prod;
     }
@@ -233,9 +225,6 @@ public class ResolveFunctionWithConfig {
     }
 
     public Sentence resolve(Module m, Sentence s) {
-        if (s.att().contains(Attribute.MACRO_KEY) || s.att().contains(Attribute.ALIAS_KEY)) {
-            return s;
-        }
         if (s instanceof Rule) {
             return resolve((Rule) s, m);
         } else if (s instanceof Context) {

@@ -105,6 +105,10 @@ public final class JavaExecutionOptions {
             "don't have all their side conditions satisfied and are not applied.")
     public boolean logRules = false;
 
+    @Parameter(names = "--log-impl", description = "Log all conjunctive formulas generated during " +
+            "spec rule application or final implications. Verbose.")
+    public boolean logImplications = false;
+
     @Parameter(names = "--log-func-eval", description = "Log results of function evaluation for every KItem." +
             " Will log initial item and either evaluation result or message \"no rule applicable\"")
     public boolean logFunctionEval = false;
@@ -144,6 +148,9 @@ public final class JavaExecutionOptions {
                     "and statistics for main runtime caches. " +
                     "WARNING: Execution time with this option is longer because System.gc() is invoked in 3 places.")
     public boolean profileMemAdv = false;
+
+    @Parameter(names="--skip-invoking-backend", description="Skip invoking the Java Backend.")
+    public boolean skipInvokingBackend = false;
 
     public static class LogEventConverter extends BaseEnumConverter<StateLog.LogEvent> {
 

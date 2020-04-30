@@ -3,8 +3,12 @@ package org.kframework.unparser;
 
 import com.davekoelle.AlphanumComparator;
 import com.google.inject.Inject;
+import com.google.common.collect.Multiset;
+import com.google.common.collect.HashMultiset;
+import jline.internal.Nullable;
 import org.kframework.attributes.Att;
 import org.kframework.backend.kore.ModuleToKORE;
+import org.kframework.builtin.KLabels;
 import org.kframework.builtin.Sorts;
 import org.kframework.compile.AddSortInjections;
 import org.kframework.compile.ExpandMacros;
@@ -15,38 +19,43 @@ import org.kframework.kompile.KompileOptions;
 import org.kframework.kore.Assoc;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
+import org.kframework.kore.KLabel;
 import org.kframework.kore.KVariable;
 import org.kframework.kore.Sort;
 import org.kframework.kore.TransformK;
+import org.kframework.kore.VisitK;
 import org.kframework.main.GlobalOptions;
-import org.kframework.parser.concrete2kore.generator.RuleGrammarGenerator;
-import org.kframework.parser.concrete2kore.ParseInModule;
 import org.kframework.parser.ProductionReference;
+import org.kframework.parser.Term;
+import org.kframework.parser.inner.ParseInModule;
+import org.kframework.parser.inner.generator.RuleGrammarGenerator;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.errorsystem.KExceptionManager;
 import org.kframework.utils.file.FileUtil;
 import org.kframework.utils.file.TTYInfo;
+import org.kframework.utils.inject.RequestScoped;
+import scala.Option;
 import scala.Tuple2;
 
 import java.io.IOException;
 import java.io.OutputStream;
-
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
-import scala.Option;
 
 import static org.kframework.kore.KORE.*;
 
 /**
  * Class for printing information and outputting to files using various serializers.
  */
+@RequestScoped
 public class KPrint {
 
     private final KExceptionManager kem;
@@ -55,26 +64,28 @@ public class KPrint {
     private final KompileOptions    kompileOptions;
 
     public final PrintOptions options;
-    private final Optional<CompiledDefinition> compiledDefinition;
+
+    @Nullable
+    private final CompiledDefinition compiledDefinition;
 
     public KPrint() {
-        this(new KExceptionManager(new GlobalOptions()), FileUtil.testFileUtil(), new TTYInfo(false, false, false), new PrintOptions(), Optional.empty(), new KompileOptions());
+        this(new KExceptionManager(new GlobalOptions()), FileUtil.testFileUtil(), new TTYInfo(false, false, false),
+                new PrintOptions(), null, new KompileOptions());
     }
 
     public KPrint(CompiledDefinition compiledDefinition) {
-        this(new KExceptionManager(compiledDefinition.kompileOptions.global), FileUtil.testFileUtil(), new TTYInfo(false, false, false), new PrintOptions(), compiledDefinition);
+        this(new KExceptionManager(compiledDefinition.kompileOptions.global), FileUtil.testFileUtil(),
+                new TTYInfo(false, false, false), new PrintOptions(), compiledDefinition,
+                compiledDefinition.kompileOptions);
     }
 
     @Inject
-    public KPrint(KExceptionManager kem, FileUtil files, TTYInfo tty, PrintOptions options, CompiledDefinition compiledDefinition) {
-        this(kem, files, tty, options, Optional.of(compiledDefinition), compiledDefinition.kompileOptions);
-    }
-
-    public KPrint(KExceptionManager kem, FileUtil files, TTYInfo tty, PrintOptions options, Optional<CompiledDefinition> compiledDefinition, KompileOptions kompileOptions) {
-        this.kem            = kem;
-        this.files          = files;
-        this.tty            = tty;
-        this.options        = options;
+    public KPrint(KExceptionManager kem, FileUtil files, TTYInfo tty, PrintOptions options,
+                  CompiledDefinition compiledDefinition, KompileOptions kompileOptions) {
+        this.kem = kem;
+        this.files = files;
+        this.tty = tty;
+        this.options = options;
         this.compiledDefinition = compiledDefinition;
         this.kompileOptions = kompileOptions;
     }
@@ -92,6 +103,7 @@ public class KPrint {
         if (options.outputFile == null) {
             try {
                 out.write(output);
+                out.flush();
             } catch (IOException e) {
                 throw KEMException.internalError(e.getMessage(), e);
             }
@@ -125,35 +137,6 @@ public class KPrint {
     }
 
     public byte[] prettyPrint(Definition def, Module module, K orig, ColorSetting colorize, OutputModes outputMode) {
-        switch (outputMode) {
-            case KAST:
-            case NONE:
-            case BINARY:
-            case JSON:
-            case PRETTY:
-                return prettyPrint(module, orig, colorize, outputMode);
-            case PROGRAM: {
-                K result = abstractTerm(module, orig);
-                RuleGrammarGenerator gen = new RuleGrammarGenerator(def);
-                Module unparsingModule = RuleGrammarGenerator.getCombinedGrammar(gen.getProgramsGrammar(module), false).getParsingModule();
-                return (unparseTerm(result, unparsingModule, colorize) + "\n").getBytes();
-            }
-            case KORE:
-                if (!compiledDefinition.isPresent()) {
-                    throw KEMException.criticalError("KORE output requires a compiled definition.");
-                }
-                CompiledDefinition cdef = compiledDefinition.get();
-                ModuleToKORE converter = new ModuleToKORE(module, files, cdef.topCellInitializer, kompileOptions);
-                K result = ExpandMacros.forNonSentences(module, files, kompileOptions, false).expand(orig);
-                result = new AddSortInjections(module).addInjections(result);
-                converter.convert(result);
-                return converter.toString().getBytes();
-            default:
-                throw KEMException.criticalError("Unsupported output mode without a CompiledDefinition: " + outputMode);
-        }
-    }
-
-    public byte[] prettyPrint(Module module, K orig, ColorSetting colorize, OutputModes outputMode) {
         K result = abstractTerm(module, orig);
         switch (outputMode) {
             case KAST:
@@ -162,11 +145,26 @@ public class KPrint {
             case JSON:
             case LATEX:
                 return serialize(result, outputMode);
-            case PRETTY: {
-                Module unparsingModule = RuleGrammarGenerator.getCombinedGrammar(module, false).getExtensionModule();
-                return (unparseTerm(result, unparsingModule, colorize) + "\n").getBytes();
-            } default:
-                throw KEMException.criticalError("Unsupported output mode without a Definition: " + outputMode);
+            case PRETTY:
+                Module prettyUnparsingModule = RuleGrammarGenerator.getCombinedGrammar(module, false).getExtensionModule();
+                return (unparseTerm(result, prettyUnparsingModule, colorize) + "\n").getBytes();
+            case PROGRAM: {
+                RuleGrammarGenerator gen = new RuleGrammarGenerator(def);
+                Module programUnparsingModule = RuleGrammarGenerator.getCombinedGrammar(gen.getProgramsGrammar(module), false).getParsingModule();
+                return (unparseTerm(result, programUnparsingModule, colorize) + "\n").getBytes();
+            }
+            case KORE:
+                if (compiledDefinition == null) {
+                    throw KEMException.criticalError("KORE output requires a compiled definition.");
+                }
+                ModuleToKORE converter = new ModuleToKORE(module, files, compiledDefinition.topCellInitializer, kompileOptions);
+                result = ExpandMacros.forNonSentences(module, files, kompileOptions, false).expand(result);
+                result = new AddSortInjections(module).addInjections(result);
+                StringBuilder sb = new StringBuilder();
+                converter.convert(result, sb);
+                return sb.toString().getBytes();
+            default:
+                throw KEMException.criticalError("Unsupported output mode without a CompiledDefinition: " + outputMode);
         }
     }
 
@@ -199,20 +197,116 @@ public class KPrint {
         return unparseInternal(test, input, colorize);
     }
 
+    private Term disambiguateForUnparse(Module mod, Term t) {
+        if (kompileOptions.isKore()) {
+            return t;
+        } else {
+            return ParseInModule.disambiguateForUnparse(mod, t);
+        }
+    }
+
     private String unparseInternal(Module mod, K input, ColorSetting colorize) {
         ExpandMacros expandMacros = ExpandMacros.forNonSentences(mod, files, kompileOptions, true);
         return Formatter.format(
-                new AddBrackets(mod).addBrackets((ProductionReference) ParseInModule.disambiguateForUnparse(mod, KOREToTreeNodes.apply(KOREToTreeNodes.up(mod, expandMacros.expand(input)), mod))), options.color(tty.stdout, files.getEnv()));
+                new AddBrackets(mod).addBrackets((ProductionReference) disambiguateForUnparse(mod, KOREToTreeNodes.apply(KOREToTreeNodes.up(mod, expandMacros.expand(input)), mod, kompileOptions.isKore()))), options.color(tty.stdout, files.getEnv()));
     }
 
     public K abstractTerm(Module mod, K term) {
-        K collectionsSorted = options.noSortCollections    ? term              : sortCollections(mod, term);
+        K filteredSubst     = options.noFilterSubstitution || !kompileOptions.isKore() ? term : filterSubst(term, mod);
+        K origNames         = options.restoreOriginalNames ? restoreOriginalNameIfPresent(filteredSubst) : filteredSubst;
+        K collectionsSorted = options.noSortCollections    ? origNames : sortCollections(mod, origNames);
+        //non-determinism is still possible if associative/commutative collection terms start with anonymous vars
         K alphaRenamed      = options.noAlphaRenaming      ? collectionsSorted : alphaRename(collectionsSorted);
-        K origNames         = options.restoreOriginalNames ? restoreOriginalNameIfPresent(alphaRenamed) : alphaRenamed;
-        K squashedTerm      = squashTerms(mod, origNames);
+        K squashedTerm      = squashTerms(mod, alphaRenamed);
         K flattenedTerm     = flattenTerms(mod, squashedTerm);
 
         return flattenedTerm;
+    }
+
+    private Set<KVariable> vars(K term) {
+      return new HashSet<>(multivars(term));
+    }
+
+    private Multiset<KVariable> multivars(K term) {
+      Multiset<KVariable> vars = HashMultiset.create();
+      new VisitK() {
+        @Override
+        public void apply(KVariable var) {
+          vars.add(var);
+        }
+      }.apply(term);
+      return vars;
+    }
+
+    private K filterSubst(K term, Module mod) {
+      if (!(term instanceof KApply)) {
+        return term;
+      }
+      KApply kapp = (KApply)term;
+      if (kapp.klabel().head().equals(KLabels.ML_AND)) {
+        return filterConjunction(kapp, mod);
+      } else if (kapp.klabel().head().equals(KLabels.ML_OR)) {
+        KLabel unit = KLabel(KLabels.ML_FALSE.name(), kapp.klabel().params().apply(0));
+        List<K> disjuncts = Assoc.flatten(kapp.klabel(), kapp.items(), unit);
+        return disjuncts.stream()
+                .map(d -> filterConjunction(d, mod))
+                .distinct()
+                .reduce((k1, k2) -> KApply(kapp.klabel(), k1, k2))
+                .orElse(KApply(unit));
+      } else if (kapp.klabel().head().equals(KLabels.ML_EQUALS)) {
+        KLabel unit = KLabel(KLabels.ML_TRUE.name(), kapp.klabel().params().apply(0));
+        return filterEquality(kapp, multivars(kapp), mod).orElse(KApply(unit));
+      } else {
+        return term;
+      }
+    }
+
+    private K filterConjunction(K term, Module mod) {
+      if (!(term instanceof KApply)) {
+        return term;
+      }
+      KApply kapp = (KApply)term;
+      if (kapp.klabel().head().equals(KLabels.ML_AND)) {
+        KLabel unit = KLabel(KLabels.ML_TRUE.name(), kapp.klabel().params().apply(0));
+        List<K> conjuncts = Assoc.flatten(kapp.klabel(), kapp.items(), unit);
+        return conjuncts.stream()
+                .map(d -> filterEquality(d, multivars(kapp), mod))
+                .filter(Optional::isPresent)
+                .map(Optional::get)
+                .reduce((k1, k2) -> KApply(kapp.klabel(), k1, k2))
+                .orElse(KApply(unit));
+      } else if (kapp.klabel().head().equals(KLabels.ML_EQUALS)) {
+        KLabel unit = KLabel(KLabels.ML_TRUE.name(), kapp.klabel().params().apply(0));
+        return filterEquality(kapp, multivars(kapp), mod).orElse(KApply(unit));
+      } else {
+        return term;
+      }
+    }
+
+    public Optional<K> filterEquality(K term, Multiset<KVariable> vars, Module mod) {
+      if (!(term instanceof KApply)) {
+        return Optional.of(term);
+      }
+      KApply kapp = (KApply)term;
+      if (kapp.klabel().head().equals(KLabels.ML_EQUALS)) {
+        if (!(kapp.items().get(0) instanceof KVariable) &&
+            (!(kapp.items().get(0) instanceof KApply) ||
+             !mod.attributesFor().apply(((KApply)kapp.items().get(0)).klabel()).contains(Att.FUNCTION()))) {
+          return Optional.of(term);
+        }
+        Set<KVariable> leftVars = vars(kapp.items().get(0));
+        if (leftVars.stream().filter(v -> !v.att().contains("anonymous")).findAny().isPresent()) {
+          return Optional.of(term);
+        }
+        for (KVariable var : leftVars) {
+          if (vars.count(var) != 1) {
+            return Optional.of(term);
+          }
+        }
+        return Optional.empty();
+      } else {
+        return Optional.of(term);
+      }
     }
 
     private K sortCollections(Module mod, K input) {

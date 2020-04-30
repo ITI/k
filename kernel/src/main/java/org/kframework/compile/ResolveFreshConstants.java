@@ -1,7 +1,6 @@
 // Copyright (c) 2015-2019 K Team. All Rights Reserved.
 package org.kframework.compile;
 
-import org.kframework.Collections;
 import org.kframework.attributes.Att;
 import org.kframework.builtin.BooleanUtils;
 import org.kframework.builtin.KLabels;
@@ -14,8 +13,6 @@ import org.kframework.definition.Production;
 import org.kframework.definition.ProductionItem;
 import org.kframework.definition.Rule;
 import org.kframework.definition.Sentence;
-import org.kframework.kil.Attribute;
-import org.kframework.kore.FoldK;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
 import org.kframework.kore.KLabel;
@@ -24,8 +21,8 @@ import org.kframework.kore.KVariable;
 import org.kframework.kore.Sort;
 import org.kframework.kore.TransformK;
 import org.kframework.kore.VisitK;
-import org.kframework.parser.concrete2kore.ParseInModule;
-import org.kframework.parser.concrete2kore.generator.RuleGrammarGenerator;
+import org.kframework.parser.inner.ParseInModule;
+import org.kframework.parser.inner.generator.RuleGrammarGenerator;
 import org.kframework.utils.StringUtil;
 import org.kframework.utils.errorsystem.KEMException;
 import scala.collection.Set;
@@ -91,12 +88,12 @@ public class ResolveFreshConstants {
             K left = RewriteToTop.toLeft(rule.body());
             if (left instanceof KApply) {
                 KApply kapp = (KApply)left;
-                if (kapp.klabel().equals("#withConfig")) {
+                if (kapp.klabel().name().equals("#withConfig")) {
                     left = kapp.items().get(0);
                 }
                 if (left instanceof KApply) {
                     kapp = (KApply)left;
-                    if (m.attributesFor().get(kapp.klabel()).getOrElse(() -> Att()).contains(Attribute.FUNCTION_KEY)) {
+                    if (m.attributesFor().get(kapp.klabel()).getOrElse(() -> Att()).contains(Att.FUNCTION())) {
                         return rule;
                     }
                 }
@@ -239,12 +236,12 @@ public class ResolveFreshConstants {
         counterSentences.add(Production(KLabel("getGeneratedCounterCell"), Sorts.GeneratedCounterCell(), Seq(Terminal("getGeneratedCounterCell"), Terminal("("), NonTerminal(Sorts.GeneratedTopCell()), Terminal(")")), Att.empty().add("function")));
         counterSentences.add(Rule(KRewrite(KApply(KLabel("getGeneratedCounterCell"), IncompleteCellUtils.make(KLabels.GENERATED_TOP_CELL, true, KVariable("Cell", Att.empty().add(Sort.class, Sorts.GeneratedCounterCell())), true)), KVariable("Cell", Att.empty().add(Sort.class, Sorts.GeneratedCounterCell()))), BooleanUtils.TRUE, BooleanUtils.TRUE));
 
-        if (m.equals(def.mainModule()) && kore) {
+        if (m.name().equals(def.mainModule().name()) && kore) {
             if (!m.definedKLabels().contains(KLabels.GENERATED_TOP_CELL)) {
                 RuleGrammarGenerator gen = new RuleGrammarGenerator(def);
                 ParseInModule mod = RuleGrammarGenerator.getCombinedGrammar(gen.getConfigGrammar(m), true);
                 ConfigurationInfoFromModule configInfo = new ConfigurationInfoFromModule(m);
-                Sort topCellSort = configInfo.topCell();
+                Sort topCellSort = configInfo.getRootCell();
                 KLabel topCellLabel = configInfo.getCellLabel(topCellSort);
                 Production prod = m.productionsFor().apply(topCellLabel).head();
                 KToken cellName = KToken(prod.att().get("cellName"), Sort("#CellName"));
@@ -266,7 +263,7 @@ public class ResolveFreshConstants {
         if (sentences.equals(m.localSentences())) {
             return m;
         }
-        return new GenerateSortPredicateSyntax().gen(Module(m.name(), kore ? m.imports() : add(def.getModule("K-REFLECTION").get(), m.imports()), sentences, m.att()));
+        return Module(m.name(), kore ? m.imports() : add(def.getModule("K-REFLECTION").get(), m.imports()), sentences, m.att());
     }
 }
 

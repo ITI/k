@@ -1,64 +1,28 @@
-  #Not ( ( #Not ( {
-        true
-      #Equals
-        B >=Int B
-      } )
-    #Implies
-      {
-        true
-      #Equals
-        B >=Int B
-      } )
-  #And
-    ( #Not ( {
-        true
-      #Equals
-        B >=Int B
-      } )
-    #Or
-      {
-        true
-      #Equals
-        B >=Int B
-      } )
-  #And
-    #Not ( {
-      false
+  #Not ( {
+      true
     #Equals
-      B <=Int B
-    } )
-  #And
-    {
-      A
-    #Equals
-      B
+      A >=Int B
     }
   #And
     {
       true
     #Equals
-      B <=Int B
+      B ==Int A
     } )
-#And
-  #Not ( {
-    false
-  #Equals
-    A <=Int B
-  } )
 #And
   <T>
     <k>
       .
     </k>
     <state>
-      a |-> A
-      b |-> B
-      max |-> B
+      a |-> A:Int
+      b |-> B:Int
+      max |-> B:Int
     </state>
   </T>
 #And
   {
-    true
-  #Equals
     A <=Int B
+  #Equals
+    true
   }

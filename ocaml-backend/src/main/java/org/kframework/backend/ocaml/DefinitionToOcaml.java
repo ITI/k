@@ -33,7 +33,7 @@ import org.kframework.definition.NonTerminal;
 import org.kframework.definition.Production;
 import org.kframework.definition.Rule;
 import org.kframework.definition.Sentence;
-import org.kframework.kil.Attribute;
+import org.kframework.kil.loader.Context;
 import org.kframework.kompile.CompiledDefinition;
 import org.kframework.kompile.Kompile;
 import org.kframework.kompile.KompileOptions;
@@ -53,7 +53,7 @@ import org.kframework.kore.VisitK;
 import org.kframework.kore.TransformK;
 import org.kframework.krun.KRun;
 import org.kframework.main.GlobalOptions;
-import org.kframework.parser.concrete2kore.ParserUtils;
+import org.kframework.parser.inner.ParserUtils;
 import org.kframework.parser.outer.Outer;
 import org.kframework.unparser.ToBinary;
 import org.kframework.unparser.ToKast;
@@ -98,7 +98,7 @@ public class DefinitionToOcaml implements Serializable {
     private transient final KExceptionManager kem;
     private transient final FileUtil files;
     private transient final GlobalOptions globalOptions;
-    private transient final KompileOptions kompileOptions;
+    public transient final KompileOptions kompileOptions;
     private transient ExpandMacros expandMacros;
     private transient ConvertDataStructureToLookup convertDataStructure;
     private boolean threadCellExists;
@@ -252,6 +252,7 @@ public class DefinitionToOcaml implements Serializable {
                                             ModuleTransformer.fromSentenceTransformer(new SplitThreadsCell(def.executionModule())::convert, "split threads cell into thread local and global") :
                                             ModuleTransformer.fromSentenceTransformer(s -> s, "identity function -- no transformation");
         ModuleTransformer preprocessKLabelPredicates = ModuleTransformer.fromSentenceTransformer(new PreprocessKLabelPredicates(def.executionModule())::convert, "preprocess klabel predicates");
+        ModuleTransformer removePolyKLabels = ModuleTransformer.fromSentenceTransformer(Kompile::removePolyKLabels, "remove poly klabels");
         Sentence thread = Production(KLabel("#Thread"), Sorts.KItem(), Seq(
                 Terminal("#Thread"), Terminal("("),
                 NonTerminal(Sorts.K()), Terminal(","),
@@ -260,7 +261,8 @@ public class DefinitionToOcaml implements Serializable {
                 NonTerminal(Sorts.K()), Terminal(")")));
         Sentence bottom = Production(KLabel("#Bottom"), Sorts.KItem(), Seq(Terminal("#Bottom")));
         Sentence threadLocal = Production(KLabel("#ThreadLocal"), Sorts.KItem(), Seq(Terminal("#ThreadLocal")));
-        Function1<Module, Module> pipeline = preprocessKLabelPredicates
+        Function1<Module, Module> pipeline = removePolyKLabels
+                .andThen(preprocessKLabelPredicates)
                 .andThen(splitThreadCell)
                 .andThen(mod -> Module(mod.name(), mod.imports(),
                         Stream.concat(stream(mod.localSentences()),
@@ -524,7 +526,7 @@ public class DefinitionToOcaml implements Serializable {
     private void ocamlProgramHeader(StringBuilder sb, boolean forcePlugin) {
         if (forcePlugin) {
             sb.append("let () = Plugin.load Sys.argv.(1)");
-        } else if (options.ocamlopt()) {
+        } else if (kompileOptions.optimize2 || kompileOptions.optimize3) {
             sb.append("external load_plugin_path : unit -> string = \"load_plugin_path\"\n");
             sb.append("let () = Plugin.load (load_plugin_path ())");
         }
@@ -588,7 +590,7 @@ public class DefinitionToOcaml implements Serializable {
     public String constants() {
         StringBuilder sb = new StringBuilder();
         sb.append("type sort = \n");
-        Set<Sort> sorts = mutable(mainModule.definedSorts());
+        Set<Sort> sorts = mutable(mainModule.allSorts());
         sorts.add(Sorts.Bool());
         sorts.add(Sorts.Int());
         sorts.add(Sorts.String());
@@ -669,7 +671,7 @@ public class DefinitionToOcaml implements Serializable {
             sb.append("|");
             encodeStringToIdentifier(sb, label);
             sb.append(" -> ");
-            encodeStringToIdentifier(sb, KLabel(mainModule.attributesFor().apply(label).get(Attribute.UNIT_KEY)));
+            encodeStringToIdentifier(sb, KLabel(mainModule.attributesFor().apply(label).get(Att.UNIT())));
             sb.append("\n");
         }
         sb.append("| _ -> invalid_arg \"unit_for\"\n");
@@ -683,13 +685,13 @@ public class DefinitionToOcaml implements Serializable {
         }
         sb.append("| _ -> invalid_arg \"el_for\"\n");
         sb.append("let unit_for_array (c: sort) : klabel = match c with \n");
-        Set<Sort> arraySorts = sorts.stream().filter(s -> mainModule.sortAttributesFor().get(s).getOrElse(() -> Att()).<String>getOptional("hook")
+        Set<Sort> arraySorts = sorts.stream().filter(s -> mainModule.sortAttributesFor().get(s.head()).getOrElse(() -> Att()).<String>getOptional("hook")
                 .orElse(".").equals("ARRAY.Array")).collect(Collectors.toSet());
         for (Sort sort : arraySorts) {
             sb.append("|");
             encodeStringToIdentifier(sb, sort);
             sb.append(" -> ");
-            encodeStringToIdentifier(sb, KLabel(mainModule.sortAttributesFor().apply(sort).get("unit")));
+            encodeStringToIdentifier(sb, KLabel(mainModule.sortAttributesFor().apply(sort.head()).get("unit")));
             sb.append("\n");
         }
         sb.append("| _ -> invalid_arg \"unit_for_array\"\n");
@@ -698,7 +700,7 @@ public class DefinitionToOcaml implements Serializable {
             sb.append("|");
             encodeStringToIdentifier(sb, sort);
             sb.append(" -> ");
-            encodeStringToIdentifier(sb, KLabel(mainModule.sortAttributesFor().apply(sort).get("element")));
+            encodeStringToIdentifier(sb, KLabel(mainModule.sortAttributesFor().apply(sort.head()).get("element")));
             sb.append("\n");
         }
         sb.append("| _ -> invalid_arg \"el_for_array\"\n");
@@ -1093,11 +1095,12 @@ public class DefinitionToOcaml implements Serializable {
         lookupDirectories.add(Kompile.BUILTIN_DIRECTORY);
         java.util.Set<Module> mods = new ParserUtils(files::resolveWorkingDirectory, kem, globalOptions).loadModules(
                 new HashSet<>(),
+                new Context(),
                 "require " + StringUtil.enquoteCString(definitionFile.getPath()),
                 Source.apply(definitionFile.getAbsolutePath()),
                 definitionFile.getParentFile(),
                 lookupDirectories,
-                new HashSet<>(), false);
+                new HashSet<>(), false, false);
         mods.stream().forEach(m -> klabels.addAll(mutable(m.definedKLabels())));
     }
 
@@ -1180,13 +1183,13 @@ public class DefinitionToOcaml implements Serializable {
         SetMultimap<KLabel, Rule> functionRules = HashMultimap.create();
         ListMultimap<KLabel, Rule> anywhereRules = ArrayListMultimap.create();
         anywhereKLabels = new HashSet<>();
-        stream(mainModule.rules()).filter(r -> !r.att().contains(Attribute.MACRO_KEY) && !r.att().contains(Attribute.ALIAS_KEY)).forEach(r -> {
+        stream(mainModule.rules()).filter(r -> !ExpandMacros.isMacro(r)).forEach(r -> {
             K left = RewriteToTop.toLeft(r.body());
             if (left instanceof KSequence) {
                 KSequence kseq = (KSequence) left;
                 if (kseq.items().size() == 1 && kseq.items().get(0) instanceof KApply) {
                     KApply kapp = (KApply) kseq.items().get(0);
-                    if (mainModule.attributesFor().apply(kapp.klabel()).contains(Attribute.FUNCTION_KEY)) {
+                    if (mainModule.attributesFor().apply(kapp.klabel()).contains(Att.FUNCTION())) {
                         functionRules.put(kapp.klabel(), r);
                     }
                     if (r.att().contains("anywhere")) {
@@ -1198,7 +1201,7 @@ public class DefinitionToOcaml implements Serializable {
         });
         functions = new HashSet<>(functionRules.keySet());
         for (Production p : iterable(mainModule.productions())) {
-            if (p.att().contains(Attribute.FUNCTION_KEY)) {
+            if (p.att().contains(Att.FUNCTION())) {
                 functions.add(p.klabel().get());
             }
         }
@@ -1216,7 +1219,7 @@ public class DefinitionToOcaml implements Serializable {
         //compute fixed point. The only hook that actually requires this argument is KREFLECTION.fresh, so we will automatically
         //add the real definition of this function before we declare any function that requires it.
         sb.append("let freshFunction (sort: string) (config: k) (counter: Z.t) : k = interned_bottom\n");
-        Set<KLabel> impurities = functions.stream().filter(lbl -> mainModule.attributesFor().apply(lbl).contains(Attribute.IMPURE_KEY)).collect(Collectors.toSet());
+        Set<KLabel> impurities = functions.stream().filter(lbl -> mainModule.attributesFor().apply(lbl).contains(Att.IMPURE())).collect(Collectors.toSet());
         impurities.addAll(ancestors(impurities, dependencies));
         constants = functions.stream().filter(lbl -> !impurities.contains(lbl) && stream(mainModule.productionsFor().apply(lbl)).filter(p -> p.arity() == 0).findAny().isPresent()).collect(Collectors.toSet());
 
@@ -1254,7 +1257,7 @@ public class DefinitionToOcaml implements Serializable {
                 isLetRec = true;
             }
             for (KLabel functionLabel : component) {
-                String hook = mainModule.attributesFor().get(functionLabel).getOrElse(() -> Att()).<String>getOptional(Attribute.HOOK_KEY).orElse(".");
+                String hook = mainModule.attributesFor().get(functionLabel).getOrElse(() -> Att()).<String>getOptional(Att.HOOK()).orElse(".");
                 if (hook.equals("KREFLECTION.fresh")) {
                     sb.append(conn).append("freshFunction (sort: string) (config: k) (counter: Z.t) : k = match sort with \n");
                     for (Sort sort : iterable(mainModule.freshFunctionFor().keys())) {
@@ -1296,11 +1299,11 @@ public class DefinitionToOcaml implements Serializable {
                         kem.registerCompilerWarning("missing entry for hook " + hook);
                     }
 
-                    if (mainModule.attributesFor().apply(functionLabel).contains(Attribute.PREDICATE_KEY, Sort.class)) {
-                        Sort predicateSort = (mainModule.attributesFor().apply(functionLabel).get(Attribute.PREDICATE_KEY, Sort.class));
-                        stream(mainModule.definedSorts()).filter(s -> mainModule.subsorts().greaterThanEq(predicateSort, s)).distinct()
-                                .filter(sort -> mainModule.sortAttributesFor().contains(sort)).forEach(sort -> {
-                            String sortHook = mainModule.sortAttributesFor().apply(sort).<String>getOptional("hook").orElse("");
+                    if (mainModule.attributesFor().apply(functionLabel).contains(Att.PREDICATE(), Sort.class)) {
+                        Sort predicateSort = (mainModule.attributesFor().apply(functionLabel).get(Att.PREDICATE(), Sort.class));
+                        stream(mainModule.allSorts()).filter(s -> mainModule.subsorts().greaterThanEq(predicateSort, s)).distinct()
+                                .filter(sort -> mainModule.sortAttributesFor().contains(sort.head())).forEach(sort -> {
+                            String sortHook = mainModule.sortAttributesFor().apply(sort.head()).<String>getOptional("hook").orElse("");
                             if (predicateRules.containsKey(sortHook)) {
                                 sb.append("| ");
                                 sb.append(predicateRules.get(sortHook).apply(sort));
@@ -1370,13 +1373,13 @@ public class DefinitionToOcaml implements Serializable {
         }
         List<Rule> sortedRules = unsortedRules.stream()
                 .sorted(this::sortRules)
-                .filter(r -> !functionRules.values().contains(r) && !r.att().contains(Attribute.MACRO_KEY) && !r.att().contains(Attribute.ALIAS_KEY) && !r.att().contains(Attribute.ANYWHERE_KEY))
+                .filter(r -> !functionRules.values().contains(r) && !ExpandMacros.isMacro(r) && !r.att().contains(Att.ANYWHERE()))
                 .collect(Collectors.toList());
         sb.append("let rec get_next_op_from_exp(c: kitem) : (k -> k * (step_function)) = ");
         Set<KLabel> allStepFunctions = Sets.difference(mutable(mainModule.definedKLabels()), functions);
         Map<Optional<KLabel>, List<Rule>> groupedByStepFunction = sortedRules.stream().collect(
                 Collectors.groupingBy(r -> getNextOperation(RewriteToTop.toLeft(r.body()), false)));
-        if (options.optimizeStep()) {
+        if (kompileOptions.optimize3 || options.optimizeG) {
             sb.append("match c with KApply1(_,hd :: tl) -> (\n");
             sb.append("match (normalize hd) with KApply(lbl,_) -> (match lbl with \n");
             for (KLabel lbl : allStepFunctions) {
@@ -1405,7 +1408,7 @@ public class DefinitionToOcaml implements Serializable {
             Collections.sort(rulesForStepFunc, this::sortRules);
             ruleNum = writeStepFunction(sb, rulesForStepFunc, "step" + encodeStringToIdentifier(lbl), ruleNum);
         }
-        if (options.optimizeStep()) {
+        if (kompileOptions.optimize3 || options.optimizeG) {
             ruleNum = writeStepFunction(sb, groupedByStepFunction.getOrDefault(Optional.<KLabel>empty(), Collections.emptyList()), "stepNone", ruleNum);
         }
 
@@ -1721,7 +1724,7 @@ public class DefinitionToOcaml implements Serializable {
         }
 
         for (KLabel label : Sets.union(functions, anywhereKLabels)) {
-            String hook = mainModule.attributesFor().apply(label).<String>getOptional(Attribute.HOOK_KEY).orElse(".");
+            String hook = mainModule.attributesFor().apply(label).<String>getOptional(Att.HOOK()).orElse(".");
 
             if (mainModule.attributesFor().apply(label).contains("canTakeSteps")) {
                 // this function requires a call to eval, so we need to add the dummy dependency
@@ -2070,7 +2073,7 @@ public class DefinitionToOcaml implements Serializable {
     }
 
     private Optional<KApply> hasKCellContents(K body) {
-        if (!options.optimizeStep()) return Optional.empty();
+        if (!kompileOptions.optimize3 && !options.optimizeG) return Optional.empty();
         List<KApply> kCells = new ArrayList<>();
         new VisitK() {
             @Override
@@ -2110,8 +2113,8 @@ public class DefinitionToOcaml implements Serializable {
                                 }
                                 if (head instanceof KVariable) {
                                     Sort s = head.att().getOptional(Sort.class).orElse(Sort(""));
-                                    if (mainModule.sortAttributesFor().contains(s)) {
-                                        String hook = mainModule.sortAttributesFor().apply(s).<String>getOptional("hook").orElse("");
+                                    if (mainModule.sortAttributesFor().contains(s.head())) {
+                                        String hook = mainModule.sortAttributesFor().apply(s.head()).<String>getOptional("hook").orElse("");
                                         if (!sortVarHooks.containsKey(hook)) {
                                             h.b = true;
                                         }
@@ -2191,7 +2194,7 @@ public class DefinitionToOcaml implements Serializable {
     }
 
     private Optional<KLabel> getNextOperation(K side, boolean rhs) {
-        if (!options.optimizeStep()) return Optional.empty();
+        if (!kompileOptions.optimize3 && !options.optimizeG) return Optional.empty();
         final List<KLabel> nextOps = new ArrayList<>();
         MutableBoolean hasProblem = new MutableBoolean(false);
         new VisitK() {
@@ -2571,8 +2574,8 @@ public class DefinitionToOcaml implements Serializable {
         }
         vars.vars.put(k, varName);
         Sort s = k.att().getOptional(Sort.class).orElse(Sort(""));
-        if (mainModule.sortAttributesFor().contains(s)) {
-            String hook = mainModule.sortAttributesFor().apply(s).<String>getOptional("hook").orElse("");
+        if (mainModule.sortAttributesFor().contains(s.head())) {
+            String hook = mainModule.sortAttributesFor().apply(s.head()).<String>getOptional("hook").orElse("");
             if (sortVarHooks.containsKey(hook)) {
                 sb.append("(");
                 sb.append(sortVarHooks.get(hook).apply(s));
@@ -2700,7 +2703,7 @@ public class DefinitionToOcaml implements Serializable {
 
         public void applyFunction(KApply k) {
             boolean stack = inBooleanExp;
-            String hook = mainModule.attributesFor().apply(k.klabel()).<String>getOptional(Attribute.HOOK_KEY).orElse("");
+            String hook = mainModule.attributesFor().apply(k.klabel()).<String>getOptional(Att.HOOK()).orElse("");
             // use native &&, ||, not where possible
             switch (hook) {
             case "BOOL.and":
@@ -2764,9 +2767,9 @@ public class DefinitionToOcaml implements Serializable {
                 if (collectionFor.containsKey(k.klabel()) && !rhs) {
                     KLabel collectionLabel = collectionFor.get(k.klabel());
                     Att attr = mainModule.attributesFor().apply(collectionLabel);
-                    if (attr.contains(Attribute.ASSOCIATIVE_KEY)
-                            && !attr.contains(Attribute.COMMUTATIVE_KEY)
-                            && !attr.contains(Attribute.IDEMPOTENT_KEY)) {
+                    if (attr.contains(Att.ASSOC())
+                            && !attr.contains(Att.COMM())
+                            && !attr.contains(Att.IDEM())) {
                         // list
                         sb.append("(List (");
                         encodeStringToIdentifier(sb, mainModule.sortFor().apply(collectionLabel));
@@ -2813,14 +2816,14 @@ public class DefinitionToOcaml implements Serializable {
                         return;
                     }
                 }
-                if (mainModule.attributesFor().apply(k.klabel()).contains(Attribute.PREDICATE_KEY, Sort.class)) {
-                    Sort s = mainModule.attributesFor().apply(k.klabel()).get(Attribute.PREDICATE_KEY, Sort.class);
+                if (mainModule.attributesFor().apply(k.klabel()).contains(Att.PREDICATE(), Sort.class)) {
+                    Sort s = mainModule.attributesFor().apply(k.klabel()).get(Att.PREDICATE(), Sort.class);
                     if (s.equals(Sorts.K()) && k.klist().items().size() == 1) {
                         apply(BooleanUtils.TRUE);
                         return;
                     }
-                    if (mainModule.sortAttributesFor().contains(s)) {
-                        String hook2 = mainModule.sortAttributesFor().apply(s).<String>getOptional("hook").orElse("");
+                    if (mainModule.sortAttributesFor().contains(s.head())) {
+                        String hook2 = mainModule.sortAttributesFor().apply(s.head()).<String>getOptional("hook").orElse("");
                         if (sortVarHooks.containsKey(hook2)) {
                             if (k.klist().items().size() == 1) {
                                 KSequence item = (KSequence) k.klist().items().get(0);
@@ -2889,8 +2892,8 @@ public class DefinitionToOcaml implements Serializable {
                 sb.append(k.s());
                 return;
             }
-            if (mainModule.sortAttributesFor().contains(k.sort())) {
-                String hook = mainModule.sortAttributesFor().apply(k.sort()).<String>getOptional("hook").orElse("");
+            if (mainModule.sortAttributesFor().contains(k.sort().head())) {
+                String hook = mainModule.sortAttributesFor().apply(k.sort().head()).<String>getOptional("hook").orElse("");
                 if (sortHooks.containsKey(hook)) {
                     sb.append(sortHooks.get(hook).apply(k.s()));
                     return;

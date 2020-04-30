@@ -1,5 +1,5 @@
 # Maintainer: Dwight Guth <dwight.guth@runtimeverification.com>
-pkgname=kframework
+pkgname=kframework-git
 pkgver=5.0.0
 pkgrel=1
 epoch=
@@ -8,7 +8,7 @@ arch=('x86_64')
 url="https://github.com/kframework/k"
 license=('custom')
 groups=()
-depends=('java-runtime' 'flex' 'gcc' 'gmp' 'mpfr' 'z3' 'clang' 'libyaml' 'jemalloc' 'opam' 'gawk' 'make' 'diffutils' 'patch' 'tar' 'grep' 'llvm' 'lld')
+depends=('java-runtime' 'flex' 'bison' 'gettext' 'gcc' 'gmp' 'mpfr' 'z3' 'clang' 'libyaml' 'jemalloc' 'opam' 'gawk' 'make' 'diffutils' 'patch' 'tar' 'grep' 'llvm' 'lld')
 makedepends=('maven' 'jdk-openjdk' 'cmake' 'boost' 'zlib')
 checkdepends=()
 optdepends=()
@@ -30,7 +30,7 @@ prepare() {
 
 build() {
 	cd ..
-	mvn package -DskipTests
+	mvn --batch-mode package -DskipTests -Dllvm.backend.prefix=/usr/lib/kframework -Dllvm.backend.destdir="$srcdir"
 }
 
 check() {
@@ -39,6 +39,6 @@ check() {
 
 package() {
 	cd ..
-	DESTDIR="$pkgdir/" src/main/scripts/package
+	DESTDIR="$pkgdir" PREFIX="/usr" src/main/scripts/package
 	install -Dm644 LICENSE.md "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
 }

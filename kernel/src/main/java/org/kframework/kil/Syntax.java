@@ -1,10 +1,9 @@
 // Copyright (c) 2012-2019 K Team. All Rights Reserved.
 package org.kframework.kil;
 
-import com.beust.jcommander.internal.Lists;
+import org.kframework.kore.Sort;
 
 import java.util.ArrayList;
-import java.util.LinkedList;
 import java.util.List;
 
 /**
@@ -15,20 +14,18 @@ import java.util.List;
 public class Syntax extends ModuleItem {
     /** The sort being declared. */
     NonTerminal sort;
+    java.util.List<Sort> params;
     java.util.List<PriorityBlock> priorityBlocks;
 
-    public Syntax(NonTerminal sort, java.util.List<PriorityBlock> priorities) {
+    public Syntax(NonTerminal sort, List<Sort> params, List<PriorityBlock> priorities) {
         super();
         this.sort = sort;
+        this.params = params;
         this.priorityBlocks = priorities;
     }
 
-    public Syntax(NonTerminal sort, PriorityBlock... priorities) {
-        this(sort, Lists.newArrayList(priorities));
-    }
-
-    public Syntax(NonTerminal sort) {
-        this(sort, new ArrayList<PriorityBlock>());
+    public Syntax(NonTerminal sort, List<Sort> params) {
+        this(sort, params, new ArrayList<PriorityBlock>());
     }
 
     /**
@@ -36,6 +33,10 @@ public class Syntax extends ModuleItem {
      */
     public NonTerminal getDeclaredSort() {
         return sort;
+    }
+
+    public List<Sort> getParams() {
+        return params;
     }
 
     public void setSort(NonTerminal sort) {
@@ -50,23 +51,29 @@ public class Syntax extends ModuleItem {
         this.priorityBlocks = priorityBlocks;
     }
 
-    public Syntax(Syntax node) {
-        super(node);
-        this.sort = node.sort;
-        this.priorityBlocks = node.priorityBlocks;
-    }
-
     @Override
-    public String toString() {
-        String blocks = "";
-
-        for (PriorityBlock pb : priorityBlocks) {
-            blocks += pb + "\n> ";
+    public void toString(StringBuilder sb) {
+        sb.append("  syntax ");
+        if(!params.isEmpty()) {
+            sb.append("{");
+            String conn = "";
+            for (Sort param : params) {
+                sb.append(conn);
+                sb.append(param);
+                conn = ", ";
+            }
+            sb.append("} ");
         }
-        if (blocks.length() > 2)
-            blocks = blocks.substring(0, blocks.length() - 3);
-
-        return "  syntax " + sort + " ::= " + blocks + "\n";
+        sb.append(sort).append(" ").append(getAttributes());
+        if (!priorityBlocks.isEmpty()) {
+            sb.append(" ::=\n    ");
+            String conn = "";
+            for (PriorityBlock pb : priorityBlocks) {
+                sb.append(conn);
+                pb.toString(sb);
+                conn = "\n  > ";
+            }
+        }
     }
 
     @Override
@@ -102,8 +109,4 @@ public class Syntax extends ModuleItem {
         return hash;
     }
 
-    @Override
-    public Syntax shallowCopy() {
-        return new Syntax(this);
-    }
 }

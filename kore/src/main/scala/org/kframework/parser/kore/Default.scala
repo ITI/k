@@ -24,9 +24,13 @@ object implementation {
 
     case class AxiomDeclaration(params: Seq[i.SortVariable], pattern: i.Pattern, att: i.Attributes) extends i.AxiomDeclaration
 
+    case class ClaimDeclaration(params: Seq[i.SortVariable], pattern: i.Pattern, att: i.Attributes) extends i.ClaimDeclaration
+
     case class Attributes(patterns: Seq[i.Pattern]) extends i.Attributes
 
     case class Variable(name: String, sort: i.Sort) extends i.Variable
+
+    case class SetVariable(name: String, sort: i.Sort) extends i.SetVariable
 
     case class Application(head: i.SymbolOrAlias, args: Seq[i.Pattern]) extends i.Application
 
@@ -108,9 +112,13 @@ object implementation {
 
     def AxiomDeclaration(params: Seq[i.SortVariable], _1: i.Pattern, att: i.Attributes): i.Declaration = d.AxiomDeclaration(params, _1, att)
 
+    def ClaimDeclaration(params: Seq[i.SortVariable], _1: i.Pattern, att: i.Attributes): i.Declaration = d.ClaimDeclaration(params, _1, att)
+
     def Attributes(patterns: Seq[Pattern]): i.Attributes = d.Attributes(patterns)
 
     def Variable(name: String, sort: i.Sort): i.Variable = d.Variable(name, sort)
+
+    def SetVariable(name: String, sort: i.Sort): i.SetVariable = d.SetVariable(name, sort)
 
     def Application(head: i.SymbolOrAlias, args: Seq[i.Pattern]): i.Pattern = d.Application(head, args)
 

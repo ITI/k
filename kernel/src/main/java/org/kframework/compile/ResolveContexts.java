@@ -55,7 +55,7 @@ public class ResolveContexts {
                 .map(s -> (Context) s)
                 .flatMap(c -> this.resolve(c, input)).collect(Collectors.toCollection(HashSet::new));
         if (!rulesToAdd.isEmpty()) {
-            rulesToAdd.add(SyntaxSort(Sorts.K()));
+            rulesToAdd.add(SyntaxSort(Seq(), Sorts.K()));
         }
         return Module(input.name(), input.imports(), (scala.collection.Set<Sentence>) stream(input.localSentences()).filter(s -> !(s instanceof Context)).collect(Collections.toSet()).$bar(immutable(rulesToAdd)), input.att());
     }
@@ -176,7 +176,14 @@ public class ResolveContexts {
         List<ProductionItem> items = new ArrayList<>();
         KLabel freezerLabel;
         if (cooled instanceof KApply) {
-            freezerLabel = getUniqueFreezerLabel(input, ((KApply)cooled).klabel().name() + finalHolePosition[0]);
+            KApply kApply = (KApply)cooled;
+            String name = kApply.klabel().name();
+            if (name.equals("#SemanticCastToK")) {
+                K firstArg = kApply.klist().items().get(0);
+                if (firstArg instanceof KApply)
+                    name = ((KApply)firstArg).klabel().name();
+            }
+            freezerLabel = getUniqueFreezerLabel(input, name + finalHolePosition[0]);
         } else {
             freezerLabel = getUniqueFreezerLabel(input, "");
         }

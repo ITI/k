@@ -4,12 +4,16 @@ package org.kframework.kompile;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import org.apache.commons.io.FilenameUtils;
+
 import org.kframework.backend.Backends;
 import org.kframework.main.GlobalOptions;
+import org.kframework.unparser.OutputModes;
+import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.file.FileUtil;
 import org.kframework.utils.inject.RequestScoped;
 import org.kframework.utils.options.OuterParsingOptions;
 import org.kframework.utils.options.SMTOptions;
+import org.kframework.utils.options.BaseEnumConverter;
 import org.kframework.utils.options.StringListConverter;
 
 import java.io.Serializable;
@@ -32,8 +36,8 @@ public class KompileOptions implements Serializable {
     public OuterParsingOptions outerParsing = new OuterParsingOptions();
 
     // Common options
-    @Parameter(names="--backend", description="Choose a backend. <backend> is one of [ocaml|java|llvm|kore|haskell]. Each creates the kompiled K definition.")
-    public String backend = Backends.OCAML;
+    @Parameter(names="--backend", description="Choose a backend. <backend> is one of [llvm|haskell|kore|java|ocaml]. Each creates the kompiled K definition.")
+    public String backend = Backends.LLVM;
 
     private boolean kore;
 
@@ -57,15 +61,15 @@ public class KompileOptions implements Serializable {
         return syntaxModule;
     }
 
-    @Parameter(names="--transition", listConverter=StringListConverter.class, description="<string> is a whitespace-separated list of tags designating rules to become transitions.")
-    public List<String> transition = Collections.singletonList(DEFAULT_TRANSITION);
-
-    public static final String DEFAULT_TRANSITION = "transition";
-
-    @Parameter(names="--non-strict", description="Do not add runtime sort checks for every variable's inferred sort.")
+    @Parameter(names="--non-strict", description="Do not add runtime sort checks for every variable's inferred sort. Only has an effect with `--backend ocaml`.")
     private boolean nonStrict;
 
-    public boolean strict() { return !nonStrict; }
+    public boolean strict() {
+        if (nonStrict && ! backend.equals("ocaml")) {
+            throw KEMException.criticalError("Option `--non-strict` only makes sense for `--backend ocaml`.");
+        }
+        return !nonStrict;
+    }
 
     @Parameter(names="--coverage", description="Generate coverage data when executing semantics.")
     public boolean coverage;
@@ -75,6 +79,18 @@ public class KompileOptions implements Serializable {
 
     @Parameter(names="--hook-namespaces", listConverter=StringListConverter.class, description="<string> is a whitespace-separated list of namespaces to include in the hooks defined in the definition")
     public List<String> hookNamespaces = Collections.emptyList();
+
+    @Parameter(names="-O1", description="Optimize in ways that improve performance and code size, but interfere with debugging and increase compilation time slightly.")
+    public boolean optimize1;
+
+    @Parameter(names="-O2", description="Optimize further in ways that improve performance and code size, but interfere with debugging more and increase compilation time somewhat.")
+    public boolean optimize2;
+
+    @Parameter(names="-O3", description="Optimize aggressively in ways that significantly improve performance, but interfere with debugging significantly and also increase compilation time and code size substantially.")
+    public boolean optimize3;
+
+    @Parameter(names="-E", description="Perform outer parsing and then stop and pretty print the definition to standard output. Useful for converting a K definition into a completely self-contained file when reporting a bug.")
+    public boolean preprocess;
 
     @ParametersDelegate
     public Experimental experimental = new Experimental();
@@ -112,5 +128,16 @@ public class KompileOptions implements Serializable {
 
         @Parameter(names="--cache-file", description="Location of parse cache file. Default is $KOMPILED_DIR/cache.bin.")
         public String cacheFile;
+
+        @Parameter(names="--emit-json", description="Emit JSON serialized version of parsed and kompiled definitions.")
+        public boolean emitJson = false;
+
+        @Parameter(names="--gen-bison-parser", description="Emit bison parser for the PGM configuration variable within the syntax module of your definition into the kompiled definition.")
+        public boolean genBisonParser;
+
+        @Parameter(names="--transition", listConverter=StringListConverter.class, description="<string> is a whitespace-separated list of tags designating rules to become transitions.")
+        public List<String> transition = Collections.singletonList(DEFAULT_TRANSITION);
+
+        public static final String DEFAULT_TRANSITION = "transition";
     }
 }

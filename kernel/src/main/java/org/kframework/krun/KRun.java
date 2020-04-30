@@ -22,9 +22,7 @@ import org.kframework.rewriter.Rewriter;
 import org.kframework.unparser.KPrint;
 import org.kframework.utils.StringUtil;
 import org.kframework.utils.errorsystem.KEMException;
-import org.kframework.utils.errorsystem.KException;
 import org.kframework.utils.errorsystem.KExceptionManager;
-import org.kframework.utils.errorsystem.ParseFailedException;
 import org.kframework.utils.file.FileUtil;
 import org.kframework.utils.file.TTYInfo;
 import scala.Tuple2;
@@ -163,7 +161,7 @@ public class KRun {
             K configVar = externalParse(parser, value, sort, Source.apply("<command line: -c" + name + ">"), compiledDef);
             output.put(KToken(configVarName, Sorts.KConfigVar()), configVar);
         }
-        if (compiledDef.kompiledDefinition.mainModule().definedSorts().contains(Sorts.String())) {
+        if (compiledDef.kompiledDefinition.mainModule().allSorts().contains(Sorts.String())) {
             if (options.io()) {
                 output.put(KToken("$STDIN", Sorts.KConfigVar()), KToken("\"\"", Sorts.String()));
                 output.put(KToken("$IO", Sorts.KConfigVar()), KToken("\"on\"", Sorts.String()));
@@ -221,6 +219,9 @@ public class KRun {
     }
 
     public KApply plugConfigVars(CompiledDefinition compiledDef, Map<KToken, K> output) {
+        if (compiledDef.kompiledDefinition.mainModule().productionsFor().apply(compiledDef.topCellInitializer).head().nonterminals().isEmpty()) {
+            return KApply(compiledDef.topCellInitializer);
+        }
         return KApply(compiledDef.topCellInitializer, output.entrySet().stream().map(e -> KApply(KLabel("_|->_"), e.getKey(), e.getValue())).reduce(KApply(KLabel(".Map")), (a, b) -> KApply(KLabel("_Map_"), a, b)));
     }
 
@@ -233,8 +234,8 @@ public class KRun {
         RunProcess.ProcessOutput output = RunProcess.execute(environment, files.getProcessBuilder(), tokens.toArray(new String[tokens.size()]));
 
         if (output.exitCode != 0) {
-            throw new ParseFailedException(new KException(KException.ExceptionType.ERROR, KException.KExceptionGroup.CRITICAL, "Parser returned a non-zero exit code: "
-                    + output.exitCode + "\nStdout:\n" + new String(output.stdout) + "\nStderr:\n" + new String(output.stderr)));
+            throw KEMException.criticalError("Parser returned a non-zero exit code: "
+                    + output.exitCode + "\nStdout:\n" + new String(output.stdout) + "\nStderr:\n" + new String(output.stderr));
         }
 
         byte[] kast = output.stdout != null ? output.stdout : new byte[0];

@@ -15,6 +15,7 @@ import org.kframework.utils.OS;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.file.FileUtil;
 import org.kframework.utils.inject.RequestScoped;
+import org.kframework.utils.options.BackendOptions;
 import org.kframework.utils.options.BaseEnumConverter;
 import org.kframework.utils.options.DefinitionLoadingOptions;
 import org.kframework.utils.options.OnOffConverter;
@@ -35,6 +36,9 @@ public final class KRunOptions {
 
     @ParametersDelegate
     public ConfigurationCreationOptions configurationCreation = new ConfigurationCreationOptions();
+
+    @ParametersDelegate
+    public BackendOptions backend = new BackendOptions();
 
     public static final class ConfigurationCreationOptions {
 
@@ -82,7 +86,11 @@ public final class KRunOptions {
                 "should be parsed with the command \"kast\".")
         private Map<String, String> configVarParsers = new HashMap<>();
 
-        @DynamicParameter(names={"--config-var", "-c"}, description="Specify values for variables in the configuration.")
+        @DynamicParameter(names={"--config-var", "-c"}, description="Specify values for variables in the configuration. " +
+                "For example `-cVAR=value`. " +
+                "To read value from file, combine this option with `-p`. For example, if value is already parsed: " +
+                "`-pVAR=cat -cVAR=file`. " +
+                "If it is not parsed: `-pVAR=\"kast -s SORT\" -cVAR=file`. See `kast --help` for more details.")
         private Map<String, String> configVars = new HashMap<>();
 
         public Map<String, Pair<String, String>> configVars(String mainModuleName, FileUtil files) {
@@ -140,12 +148,8 @@ public final class KRunOptions {
         if (io != null && io == true && experimental.ltlmc()) {
             throw KEMException.criticalError("You cannot specify both --io on and --ltlmc");
         }
-        if (io != null && io == true && experimental.debugger()) {
-            throw KEMException.criticalError("You cannot specify both --io on and --debugger");
-        }
         if (search()
-                || experimental.ltlmc()
-                || experimental.debugger()) {
+                || experimental.ltlmc()) {
             return false;
         }
         if (io == null) {
@@ -229,14 +233,7 @@ public final class KRunOptions {
         public boolean statistics = false;
 
         @Parameter(names="--debugger", description="Run an execution in debug mode.")
-        private boolean debugger = false;
-
-        public boolean debugger() {
-            if (debugger && search()) {
-                throw new ParameterException("Cannot specify --search with --debug. In order to search inside the debugger, use the step-all command.");
-            }
-            return debugger;
-        }
+        public boolean debugger = false;
 
         @Parameter(names="--ltlmc", description="Specify the formula for model checking at the commandline.")
         public String ltlmc;
@@ -253,9 +250,6 @@ public final class KRunOptions {
 
         @Parameter(names="--trace", description="Print a trace of every rule applied.")
         public boolean trace = false;
-
-        @Parameter(names="--coverage-file", description="Record a trace of locations of all rules and terms applied.")
-        public File coverage = null;
 
         @Parameter(names="--native-libraries", description="Flags to pass to linker. Useful in defining rewriter plugins.",
                 listConverter=StringListConverter.class)

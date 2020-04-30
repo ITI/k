@@ -100,9 +100,9 @@ untyped KOOL.  */
                > "spawn" Block
                > Exp "=" Exp             [strict(2), right]
 
-  syntax Exps ::= List{Exp,","}          [strict]
+  syntax Exps ::= List{Exp,","}          [strict, klabel(exps)]
   syntax Val
-  syntax Vals ::= List{Val,","}
+  syntax Vals ::= List{Val,","}          [klabel(exps)]
 
 //@ \subsection{Statements}
 
@@ -132,7 +132,7 @@ untyped KOOL.  */
 
   rule if (E) S => if (E) S else {}                                     [macro]
   rule for(Start Cond; Step) {S::Stmts} => {Start while(Cond){S Step;}} [macro]
-  rule T::Type E1::Exp, E2::Exp, Es::Exps; => T E1; T E2, Es;           [macro]
+  rule T::Type E1::Exp, E2::Exp, Es::Exps; => T E1; T E2, Es;           [macro-rec]
   rule T::Type X::Id = E; => T X; X = E;                                [macro]
 
   rule class C:Id S => class C extends Object S                     // KOOL

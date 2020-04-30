@@ -6,7 +6,6 @@ import org.kframework.builtin.Sorts;
 import org.kframework.definition.Context;
 import org.kframework.definition.Rule;
 import org.kframework.definition.Sentence;
-import org.kframework.kil.Attribute;
 import org.kframework.kore.*;
 
 import java.util.HashSet;
@@ -48,7 +47,7 @@ public class DeconstructIntegerAndFloatLiterals {
     }
 
     public Sentence convert(Sentence s) {
-        if (s.att().contains(Attribute.MACRO_KEY) || s.att().contains(Attribute.ALIAS_KEY)) {
+        if (ExpandMacros.isMacro(s)) {
             return s;
         }
         if (s instanceof Rule) {

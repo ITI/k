@@ -1,4 +1,4 @@
-// Copyright (c) 2015-2018 Runtime Verification, Inc. (RV-Match team). All Rights Reserved.
+// Copyright (c) 2015-2019 Runtime Verification, Inc. (RV-Match team). All Rights Reserved.
 package org.kframework.backend.ocaml;
 
 import com.google.inject.Inject;
@@ -119,6 +119,11 @@ public class OcamlRewriter implements Function<Definition, Rewriter> {
 
             @Override
             public RewriterResult prove(Module rules, Rule boundaryPattern) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public RewriterResult bmc(Module rules) {
                 throw new UnsupportedOperationException();
             }
 
@@ -333,7 +338,7 @@ public class OcamlRewriter implements Function<Definition, Rewriter> {
         args.addAll(options.experimental.nativeLibraries.stream().flatMap(lib -> Stream.of("-cclib", lib)).collect(Collectors.toList()));
         args.addAll(Arrays.asList(objectFiles));
         String ocamlfind = OcamlBackend.getOcamlFind(files);
-        if (converter.options.ocamlopt()) {
+        if (converter.kompileOptions.optimize2 || converter.kompileOptions.optimize3) {
             args.add(0, ocamlfind);
             args.add(1, "ocamlopt");
             if (!converter.options.noLinkPrelude) {

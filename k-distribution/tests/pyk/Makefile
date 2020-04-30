@@ -4,44 +4,89 @@ K_LIB     := $(K_RELEASE)/lib
 
 KOMPILE = $(K_BIN)/kompile
 KAST    = $(K_BIN)/kast
+KRUN    = $(K_BIN)/krun
 KPROVE  = $(K_BIN)/kprove
+KPYK    = $(K_BIN)/kpyk
 
-KOMPILE_BACKEND?=java
-
-PYTHONPATH := $(K_LIB)/py-kframework
+PYTHONPATH := $(K_LIB)
 export PYTHONPATH
 
-.PHONY: all clean pyk test-kast test-prove
+.PHONY: all clean pyk                                 \
+        test test-defn test-defn-kast test-defn-prove \
+        test-kpyk test-kpyk-coverage-log
 
-all: test-kast test-prove
+all: test
 
 clean:
-	rm -rf *-kompiled
+	rm -rf $(llvm_dir) $(haskell_dir)
 
-imp_kompiled:=imp-kompiled/compiled.txt
+llvm_dir          := llvm
+llvm_imp          := $(llvm_dir)/imp.k
+llvm_imp_kompiled := $(llvm_dir)/imp-kompiled/compiled.json
 
-$(imp_kompiled): imp.k $(KOMPILE)
-	$(KOMPILE) --backend $(KOMPILE_BACKEND) -I . $<
+haskell_dir          := haskell
+haskell_imp          := $(haskell_dir)/imp.k
+haskell_imp_kompiled := $(haskell_dir)/imp-kompiled/compiled.json
 
-kast-tests/%.gen: build-config.py kast-tests/%.json
+%/imp.k: imp.k
+	mkdir -p $*
+	cp $< $@
+
+$(llvm_imp_kompiled): $(llvm_imp) $(KOMPILE)
+	$(KOMPILE) --directory $(llvm_dir) --backend llvm -I $(llvm_dir) $< --emit-json --coverage
+
+$(haskell_imp_kompiled): $(haskell_imp) $(KOMPILE)
+	$(KOMPILE) --directory $(haskell_dir) --backend haskell -I $(haskell_dir) $< --emit-json
+
+update-results:
+kompile: $(llvm_imp_kompiled) $(haskell_imp_kompiled)
+
+# Tests
+
+test: test-unit test-defn test-kpyk
+
+## Unit Tests
+
+test-unit:
+	python3 unit-test.py
+
+## Full Definition Tests
+
+test-defn: test-defn-kast test-defn-prove
+
+defn_tests = defn-tests
+
+pyk_kast_tests  = $(wildcard $(defn_tests)/kast-tests/*.json)
+pyk_prove_tests = $(wildcard $(defn_tests)/proof-tests/*-spec.json)
+
+test-defn-kast:  $(pyk_kast_tests:=.kast)
+test-defn-prove: $(pyk_prove_tests:=.prove)
+
+$(defn_tests)/kast-tests/%.gen: $(defn_tests)/build-config.py $(llvm_imp_kompiled) $(defn_tests)/kast-tests/%.json
 	python3 $^ > $@
 
-proof-tests/%-spec.k: build-config.py proof-tests/%-spec.json
+$(defn_tests)/proof-tests/%-spec.k: $(defn_tests)/build-config.py $(haskell_imp_kompiled) $(defn_tests)/proof-tests/%-spec.json
 	python3 $^ > $@
 
-pyk_kast_tests = $(wildcard kast-tests/*.json)
+$(defn_tests)/kast-tests/%.json.kast: $(defn_tests)/kast-tests/%.out
+	git --no-pager diff --no-index $(defn_tests)/kast-tests/$*.expected $(defn_tests)/kast-tests/$*.out
 
-kast-tests/%.json.kast: kast-tests/%.out
-	git --no-pager diff --no-index kast-tests/$*.expected kast-tests/$*.out
+$(defn_tests)/kast-tests/%.out: $(defn_tests)/kast-tests/%.gen $(llvm_imp_kompiled)
+	$(KAST) --directory $(llvm_dir) --output pretty --sort $(basename $(basename $*)) -m IMP $< > $@
 
-kast-tests/%.out: kast-tests/%.gen $(imp_kompiled)
-	$(KAST) --output pretty --sort $(basename $(basename $*)) -m IMP $< > $@
+$(defn_tests)/proof-tests/%-spec.json.prove: $(defn_tests)/proof-tests/%-spec.k $(haskell_imp_kompiled)
+	$(KPROVE) --directory $(haskell_dir) $< -m IMP
 
-test-kast: $(pyk_kast_tests:=.kast)
+## kpyk runner tests
 
-pyk_prove_tests = $(wildcard proof-tests/*-spec.json)
+sum_to_n_coverage := kpyk-tests/sum-to-n.imp.coverage
 
-proof-tests/%-spec.json.prove: proof-tests/%-spec.k $(imp_kompiled)
-	$(KPROVE) $< -m IMP
+test-kpyk: test-kpyk-coverage-log
 
-test-prove: $(pyk_prove_tests:=.prove)
+$(sum_to_n_coverage): $(llvm_imp_kompiled) kpyk-tests/sum-to-n.imp
+	rm -rf $(llvm_dir)/imp-kompiled/*_coverage.txt
+	$(KRUN) --directory $(llvm_dir) kpyk-tests/sum-to-n.imp
+	mv $(llvm_dir)/imp-kompiled/*_coverage.txt $@
+
+test-kpyk-coverage-log: $(sum_to_n_coverage)
+	$(KPYK) $(llvm_dir)/imp-kompiled coverage $(sum_to_n_coverage)

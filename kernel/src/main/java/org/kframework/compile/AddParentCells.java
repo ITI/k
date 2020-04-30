@@ -150,7 +150,7 @@ public class AddParentCells {
         }
 
         // They were also not forced to be separate
-        throw KEMException.criticalError("Ambiguous completion");
+        throw KEMException.criticalError("Ambiguous completion: " + parent + "\n" + allChildren);
     }
 
     boolean isCompletionItem(K k) {
@@ -292,7 +292,7 @@ public class AddParentCells {
         if (term instanceof KApply) {
             KApply app = (KApply) term;
             KApply newTerm = KApply(app.klabel(), KList(app.klist().stream()
-                    .map(this::concretize).collect(Collectors.toList())));
+                    .map(this::concretize).collect(Collectors.toList())), app.att());
             if (cfg.isParentCell(newTerm.klabel())) {
                 return concretizeCell(newTerm);
             } else {

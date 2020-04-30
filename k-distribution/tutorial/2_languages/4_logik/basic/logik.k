@@ -216,11 +216,11 @@ module LOGIK-SYNTAX
   /*@ Variables and literals are defined as tokens following the conventions
   used in Prolog (variables start with \_ or capital letter, while literals
   start with lower case letters): */
-  syntax #KVariable ::= r"[A-Z_][A-Za-z0-9_]*"   [token, prec(2), autoReject]
-                      | #UpperId                 [token, autoReject]
+  syntax #KVariable ::= r"[A-Z_][A-Za-z0-9_]*"   [token, prec(2)]
+                      | #UpperId                 [token]
   syntax Term ::= #KVariable [klabel(#SemanticCastToTerm)]
-  syntax Literal ::= r"[a-z][a-zA-Z0-9_]*"                 [autoReject, token]
-                   | #LowerId                              [autoReject, token]
+  syntax Literal ::= r"[a-z][a-zA-Z0-9_]*"                 [token]
+                   | #LowerId                              [token]
 endmodule
 
 module LOGIK
@@ -343,7 +343,7 @@ another clause can be chosen using the rule above):  */
   rule <k> L:Term => . ...</k>
        <fresh>  L:Term . => . </fresh>
 
-  rule <k> L:Term => Ls ...</k>
+  rule <k> L:Term :KItem => Ls ...</k>
        <fresh>  L:Term :- Ls:Terms. => . </fresh>
 
 /*@ Note that there is no problem if a clause is chosen whose

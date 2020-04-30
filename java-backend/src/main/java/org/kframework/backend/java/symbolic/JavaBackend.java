@@ -28,7 +28,6 @@ import org.kframework.main.GlobalOptions;
 import org.kframework.utils.errorsystem.KExceptionManager;
 import org.kframework.utils.file.FileUtil;
 
-import static org.kframework.definition.Constructors.*;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -37,7 +36,7 @@ import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-public class JavaBackend implements Backend {
+public class JavaBackend extends AbstractBackend {
 
     public static final String MAIN_AUTOMATON = "mainAutomaton";
     public static final String SPEC_AUTOMATON = "specAutomaton";
@@ -64,7 +63,7 @@ public class JavaBackend implements Backend {
         }
         Production prod = (Production)sentence;
         if (prod.klabel().isDefined() && KLabels.ListItem.equals(prod.klabel().get())) {
-            return Production(prod.sort(), prod.items(), prod.att().remove("function"));
+            return prod.withAtt(prod.att().remove("function"));
         }
         return prod;
     }
@@ -106,7 +105,7 @@ public class JavaBackend implements Backend {
                 .andThen(DefinitionTransformer.fromSentenceTransformer(new AddConfigurationRecoveryFlags(), "add refers_THIS_CONFIGURATION_marker"))
                 .andThen(DefinitionTransformer.fromSentenceTransformer(JavaBackend::markSingleVariables, "mark single variables"))
                 .andThen(DefinitionTransformer.from(new AssocCommToAssoc(), "convert AC matching to A matching"))
-                .andThen(DefinitionTransformer.from(new MergeRules(MAIN_AUTOMATON, Att.topRule()), "merge regular rules into one rule with or clauses"))
+                .andThen(DefinitionTransformer.from(new MergeRules(MAIN_AUTOMATON, Att.TOP_RULE()), "merge regular rules into one rule with or clauses"))
                 .apply(Kompile.defaultSteps(kompileOptions, kem, files).apply(d));
              // .andThen(KoreToMiniToKore::apply) // for serialization/deserialization test
     }
@@ -118,7 +117,8 @@ public class JavaBackend implements Backend {
         ModuleTransformer convertDataStructureToLookup = ModuleTransformer.fromSentenceTransformer((m, s) -> new ConvertDataStructureToLookup(m, false).convert(s), "convert data structures to lookups");
 
         //Commented steps are (possibly) required for spec automaton generation.
-        return m -> ModuleTransformer.fromSentenceTransformer(new ResolveAnonVar()::resolve, "resolve anonymous varaibles")
+        return m -> ModuleTransformer.fromSentenceTransformer(Kompile::removePolyKLabels, "remove poly klabels")
+                .andThen(ModuleTransformer.fromSentenceTransformer(new ResolveAnonVar()::resolve, "resolve anonymous varaibles"))
                 .andThen(ModuleTransformer.fromSentenceTransformer(s -> new ResolveSemanticCasts(kompileOptions.backend.equals(Backends.JAVA)).resolve(s), "resolve semantic casts"))
                 .andThen(AddImplicitComputationCell::transformModule)
                 .andThen(ConcretizeCells::transformModule)
@@ -146,7 +146,7 @@ public class JavaBackend implements Backend {
                 //.andThen(ModuleTransformer.fromSentenceTransformer(JavaBackend::markSingleVariables, "mark single variables"))
                 //.andThen(ModuleTransformer.from(new AssocCommToAssoc()::apply, "convert AC matching to A matching"))
                 .andThen(restoreDefinitionModulesTransformer(def))
-                //.andThen(ModuleTransformer.from(new MergeRules(SPEC_AUTOMATON, Att.specification())::apply, "merge spec rules into one rule with or clauses"))
+                //.andThen(ModuleTransformer.from(new MergeRules(SPEC_AUTOMATON, Att.SPECIFICATION())::apply, "merge spec rules into one rule with or clauses"))
                 .apply(m);
     }
 
@@ -156,7 +156,7 @@ public class JavaBackend implements Backend {
             if (r.body() instanceof KApply) {
                 KLabel klabel = ((KApply) r.body()).klabel();
                 if (d.mainModule().sortFor().contains(klabel) //is false for rules in specification modules not part of semantics
-                        && d.mainModule().sortFor().apply(klabel).equals(configInfo.topCell())) {
+                        && d.mainModule().sortFor().apply(klabel).equals(configInfo.getRootCell())) {
                     return Rule.apply(r.body(), r.requires(), r.ensures(), r.att().add(att));
                 }
             }
@@ -166,7 +166,7 @@ public class JavaBackend implements Backend {
 
     private static Module markSpecRules(Definition d, Module mod) {
         ConfigurationInfoFromModule configInfo = new ConfigurationInfoFromModule(d.mainModule());
-        return ModuleTransformer.fromSentenceTransformer(s -> markRegularRules(d, configInfo, s, Att.specification()), "mark specification rules").apply(mod);
+        return ModuleTransformer.fromSentenceTransformer(s -> markRegularRules(d, configInfo, s, Att.SPECIFICATION()), "mark specification rules").apply(mod);
     }
 
         /**
@@ -174,7 +174,7 @@ public class JavaBackend implements Backend {
          */
     private static Definition markRegularRules(Definition d) {
         ConfigurationInfoFromModule configInfo = new ConfigurationInfoFromModule(d.mainModule());
-        return DefinitionTransformer.fromSentenceTransformer((mod, s) -> markRegularRules(d, configInfo, s, Att.topRule()), "mark regular rules").apply(d);
+        return DefinitionTransformer.fromSentenceTransformer((mod, s) -> markRegularRules(d, configInfo, s, Att.TOP_RULE()), "mark regular rules").apply(d);
     }
 
     /**
@@ -196,7 +196,7 @@ public class JavaBackend implements Backend {
         if (s instanceof Rule) {
             Rule r = (Rule) s;
 
-            if (!r.att().contains(Att.topRule()))
+            if (!r.att().contains(Att.TOP_RULE()))
                 return r;
 
             Map<KVariable, Integer> varCount = new HashMap<>();
@@ -228,6 +228,6 @@ public class JavaBackend implements Backend {
 
     @Override
     public Set<String> excludedModuleTags() {
-        return new HashSet<>(Arrays.asList("concrete", "kore"));
+        return new HashSet<>(Arrays.asList(Att.CONCRETE(), "kore"));
     }
 }

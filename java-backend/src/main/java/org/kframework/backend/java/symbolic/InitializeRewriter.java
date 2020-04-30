@@ -24,7 +24,6 @@ import org.kframework.compile.ExpandMacros;
 import org.kframework.compile.ResolveSemanticCasts;
 import org.kframework.definition.Module;
 import org.kframework.definition.Rule;
-import org.kframework.kil.Attribute;
 import org.kframework.kompile.KompileOptions;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
@@ -36,7 +35,6 @@ import org.kframework.main.GlobalOptions;
 import org.kframework.rewriter.Rewriter;
 import org.kframework.rewriter.SearchType;
 import org.kframework.unparser.KPrint;
-import org.kframework.utils.Stopwatch;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.errorsystem.KExceptionManager;
 import org.kframework.utils.file.FileUtil;
@@ -63,7 +61,6 @@ import static org.kframework.kore.KORE.*;
 public class InitializeRewriter implements Function<org.kframework.definition.Definition, Rewriter> {
 
     private final FileSystem fs;
-    private final Stopwatch sw;
     private final GlobalOptions globalOptions;
     private final KExceptionManager kem;
     private final SMTOptions smtOptions;
@@ -91,16 +88,14 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
             JavaExecutionOptions javaExecutionOptions,
             FileUtil files,
             InitializeDefinition initializeDefinition,
-            Stopwatch sw,
             KPrint kprint,
             Profiler2 profiler) {
         this.fs = fs;
-        this.sw = sw;
         this.globalOptions = globalOptions;
         this.kem = kem;
         this.smtOptions = smtOptions;
         this.hookProvider = HookProvider.get(kem);
-        this.transitions = kompileOptions.transition;
+        this.transitions = kompileOptions.experimental.transition;
         this.krunOptions = krunOptions;
         this.kproveOptions = kproveOptions;
         this.kompileOptions = kompileOptions;
@@ -113,6 +108,7 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
     }
 
     public void chainOptions() {
+        javaExecutionOptions.logRules |= javaExecutionOptions.logImplications;
         javaExecutionOptions.debugZ3Queries |= javaExecutionOptions.debugFormulas;
         javaExecutionOptions.debugZ3 |= javaExecutionOptions.debugZ3Queries;
         javaExecutionOptions.logBasic |= javaExecutionOptions.log || javaExecutionOptions.debugZ3;
@@ -174,6 +170,10 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
             rewritingContext.stateLog.log(StateLog.LogEvent.EXECINIT, backendKil, KApply(KLabels.ML_TRUE));
             rewritingContext.setExecutionPhase(true);
             SymbolicRewriter rewriter = new SymbolicRewriter(rewritingContext, transitions, converter);
+            if (javaExecutionOptions.skipInvokingBackend) {
+                System.err.println("Skipping invoking the backend!");
+                return new RewriterResult(Optional.empty(), Optional.of(0), KORE.KApply(KLabels.ML_TRUE));
+            }
             RewriterResult result = rewriter.rewrite(new ConstrainedTerm(backendKil, termContext), depth.orElse(-1));
             rewritingContext.stateLog.close();
             return result;
@@ -197,6 +197,10 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
             rewritingContext.stateLog.log(StateLog.LogEvent.SEARCHINIT, javaTerm, KApply(KLabels.ML_TRUE));
             org.kframework.backend.java.kil.Rule javaPattern = convertToJavaPattern(converter, pattern);
             SymbolicRewriter rewriter = new SymbolicRewriter(rewritingContext, transitions, converter);
+            if (javaExecutionOptions.skipInvokingBackend) {
+                System.err.println("Skipping invoking the backend!");
+                return KORE.KApply(KLabels.ML_TRUE);
+            }
             K result = rewriter.search(javaTerm, javaPattern, bound.orElse(NEGATIVE_VALUE), depth.orElse(NEGATIVE_VALUE), searchType, termContext);
             rewritingContext.stateLog.log(StateLog.LogEvent.SEARCHREACH, result);
             rewritingContext.stateLog.close();
@@ -226,9 +230,14 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
 
             SymbolicRewriter rewriter = new SymbolicRewriter(rewritingContext, transitions, converter);
 
+            if (javaExecutionOptions.skipInvokingBackend) {
+                System.err.println("Skipping invoking the backend!");
+                return new RewriterResult(Optional.empty(), Optional.of(0), KORE.KApply(KLabels.ML_TRUE));
+            }
+
             rewritingContext.setExecutionPhase(true);
             List<ConstrainedTerm> proofResults = proofObligationRules.stream()
-                    .filter(r -> !r.att().contains(Attribute.TRUSTED_KEY))
+                    .filter(r -> !r.att().contains(Att.TRUSTED()))
                     .map(r -> {
                         //Build LHS with fully evaluated constraint. Then expand patterns.
                         ConjunctiveFormula constraint = processProofRules.getEvaluatedConstraint(r);
@@ -270,6 +279,11 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
             }
             rewritingContext.stateLog.close();
             return new RewriterResult(Optional.empty(), Optional.of(exit), result);
+        }
+
+        @Override
+        public RewriterResult bmc(Module mod) {
+            throw new UnsupportedOperationException();
         }
 
         @Override
@@ -348,7 +362,7 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
                 converter = new KOREtoBackendKIL(module, definition, rewritingContext, false);
                 termContext = TermContext.builder(rewritingContext).freshCounter(initCounterValue).build();
                 termContext.setKOREtoBackendKILConverter(converter);
-                specRules = definition.addKoreRules(specModule, converter, Att.specification(), this::evaluateRule);
+                specRules = definition.addKoreRules(specModule, converter, Att.SPECIFICATION(), this::evaluateRule);
             }
 
             private org.kframework.backend.java.kil.Rule evaluateRule(org.kframework.backend.java.kil.Rule rule) {
@@ -443,8 +457,7 @@ public class InitializeRewriter implements Function<org.kframework.definition.De
                 startEnsures.add(startRule.getEnsures(processProofRules.termContext.global()));
                 targetEnsures.add(targetRule.getEnsures(processProofRules.termContext.global()));
 
-                // assert rule1.containsAttribute(Attribute.TRUSTED_KEY) == rule2.containsAttribute(Attribute.TRUSTED_KEY);
-                trusted.add(startRule.att().contains(Attribute.TRUSTED_KEY));
+                trusted.add(startRule.att().contains(Att.TRUSTED()));
             }
         }
     }

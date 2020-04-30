@@ -1,6 +1,7 @@
 package org.kframework.parser.kore.parser
 
 import org.kframework.builtin.{KLabels, Sorts}
+import org.kframework.kore.KVariable
 import org.kframework.kore.KORE
 import org.kframework.attributes.Att
 import org.kframework.parser.kore
@@ -15,21 +16,60 @@ case class TranslationError(msg: String) extends RuntimeException(msg)
 
 /** Conversion function from Kore to K. */
 
-class KoreToK (headToLabel_ : java.util.Properties, sortAtt : Map[k.Sort, Att], enquote: String => String) {
+// sortAtt is a map from sort names to their hook attribute, if any
+class KoreToK (sortAtt : Map[String, String]) {
 
-  val koreToKLabel = headToLabel_.asScala.toMap;
+  val codes = Map(
+    "Spce" -> " ",
+    "Bang" -> "!",
+    "Quot" -> "\"",
+    "Hash" -> "#",
+    "Dolr" -> "$",
+    "Perc" -> "%",
+    "And-" -> "&",
+    "Apos" -> "'",
+    "LPar" -> "(",
+    "RPar" -> ")",
+    "Star" -> "*",
+    "Plus" -> "+",
+    "Comm" -> ",",
+    "Hyph" -> "-",
+    "Stop" -> ".",
+    "Slsh" -> "/",
+    "Coln" -> ":",
+    "SCln" -> ";",
+    "-LT-" -> "<",
+    "Eqls" -> "=",
+    "-GT-" -> ">",
+    "Ques" -> "?",
+    "-AT-" -> "@",
+    "LSqB" -> "[",
+    "RSqB" -> "]",
+    "Bash" -> "\\",
+    "Xor-" -> "^",
+    "Unds" -> "_",
+    "BQuo" -> "`",
+    "LBra" -> "{",
+    "Pipe" -> "|",
+    "RBra" -> "}",
+    "Tild" -> "~")
+
+  def mapCode(code: String): String = {
+    try {
+      val i = Integer.parseInt(code, 16)
+      "\\u" + code
+    } catch {
+      case _: NumberFormatException => codes(code)
+    }
+  }
 
   /** Returns a [[k.Sort]] from [[kore.Sort]]. */
   def apply(s: kore.Sort): k.Sort = s match {
       case kore.SortVariable(name) =>
         Sorts.K
       case kore.CompoundSort(ctr, params) =>
-        if (params.length != 0) {
-          throw new TranslationError("Parameterized sorts currently unsupported")
-        } else {
-          assert(ctr.startsWith("Sort"))
-          KORE.Sort(ctr.substring( 4));
-        }
+        assert(ctr.startsWith("Sort"))
+        KORE.Sort(ctr.substring( 4), params.map(apply): _*);
   }
 
   /** Returns a [[k.KLabel]] from [[kore.SymbolOrAlias]] */
@@ -41,7 +81,23 @@ class KoreToK (headToLabel_ : java.util.Properties, sortAtt : Map[k.Sort, Att], 
     if (head.startsWith("Lbl")) {
       extractKLabel(head.substring(3))
     } else {
-      koreToKLabel.applyOrElse(head, Function.const(head))
+      var literal = true
+      var result = new StringBuilder()
+      var i = 0
+      while (i < head.length) {
+        if (head(i) == '\'') {
+          literal = !literal
+          i += 1
+        } else if (literal) {
+          result.append(head(i))
+          i += 1
+        } else {
+          val code = head.substring(i, i+4)
+          result.append(mapCode(code))
+          i += 4
+        }
+      }
+      result.toString
     }
   }
 
@@ -59,7 +115,12 @@ class KoreToK (headToLabel_ : java.util.Properties, sortAtt : Map[k.Sort, Att], 
       KORE.KVariable(extractVarName(name), KORE.Att.add(classOf[k.Sort].toString, apply(sort).toString()))
     case kore.Application(head, args) => head.ctr match {
       case "inj" =>
-        apply(args.head)
+        val body = apply(args.head)
+        if (body.isInstanceOf[KVariable]) {
+          KORE.KApply(KORE.KLabel("#SemanticCastTo" + apply(head.params(0)).toString), body)
+        } else {
+          body
+        }
       case "kseq" =>
         KORE.KSequence(args.map(apply(_)): _*)
       case "dotk" =>
@@ -96,7 +157,8 @@ class KoreToK (headToLabel_ : java.util.Properties, sortAtt : Map[k.Sort, Att], 
     case kore.Mem(s, rs, p, q) =>
       throw new TranslationError("Mem patterns currently unsupported")
     case kore.DomainValue(s, str) =>
-      KORE.KToken(if (sortAtt.get(apply(s)).getOrElse(KORE.Att).getOptional("hook").orElse("") == "STRING.String") enquote(str) else str, apply(s))
+      val hookAtt = sortAtt.get(apply(s).name).getOrElse("")
+      KORE.KToken(if (hookAtt == "STRING.String") StringUtil.enquoteKString(str) else if (hookAtt == "BYTES.Bytes") "b" + StringUtil.enquoteKString(str) else str, apply(s))
     case kore.StringLiteral(str) =>
       KORE.KToken(str, Sorts.KString)
   }

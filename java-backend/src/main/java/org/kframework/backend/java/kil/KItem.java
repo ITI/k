@@ -25,7 +25,6 @@ import org.kframework.backend.java.util.RuleSourceUtil;
 import org.kframework.backend.java.util.Subsorts;
 import org.kframework.backend.java.utils.BitSet;
 import org.kframework.builtin.KLabels;
-import org.kframework.kil.Attribute;
 import org.kframework.main.GlobalOptions;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.errorsystem.KException.ExceptionType;
@@ -433,7 +432,7 @@ public class KItem extends Term implements KItemRepresentation {
             KLabelConstant kLabelConstant = (KLabelConstant) kItem.kLabel;
             Profiler.startTimer(Profiler.getTimerForFunction(kLabelConstant));
             int nestingLevel = kItem.profiler.evaluateFunctionNanoTimer.getLevel();
-            kItem.global.newLogIndent(KItemLog.indent(nestingLevel - 1));
+            kItem.global.newLogIndent(nestingLevel - 1);
 
             try {
                 KList kList = (KList) kItem.kList;
@@ -501,7 +500,7 @@ public class KItem extends Term implements KItemRepresentation {
                             }
 
                             // a concrete rule is skipped if some argument is not concrete
-                            if (rule.isConcrete() && !isConcrete) {
+                            if (rule.isConcreteRule() && !isConcrete) {
                                 continue;
                             }
 
@@ -871,13 +870,13 @@ public class KItem extends Term implements KItemRepresentation {
 
     public List<Term> getPatternInput() {
         assert kLabel instanceof KLabelConstant && ((KLabelConstant) kLabel).isPattern() && kList instanceof KList;
-        int inputCount = Integer.parseInt(((KLabelConstant) kLabel).getAttr(Attribute.PATTERN_KEY));
+        int inputCount = Integer.parseInt(((KLabelConstant) kLabel).getAttr(Att.PATTERN()));
         return ((KList) kList).getContents().subList(0, inputCount);
     }
 
     public List<Term> getPatternOutput() {
         assert kLabel instanceof KLabelConstant && ((KLabelConstant) kLabel).isPattern() && kList instanceof KList;
-        int inputCount = Integer.parseInt(((KLabelConstant) kLabel).getAttr(Attribute.PATTERN_KEY));
+        int inputCount = Integer.parseInt(((KLabelConstant) kLabel).getAttr(Att.PATTERN()));
         return ((KList) kList).getContents().subList(inputCount, ((KList) kList).getContents().size());
     }
 

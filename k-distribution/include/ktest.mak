@@ -8,6 +8,8 @@ KRUN=$(abspath $(MAKEFILE_PATH)/../bin/krun)
 KDEP=$(abspath $(MAKEFILE_PATH)/../bin/kdep)
 # and kprove
 KPROVE=$(abspath $(MAKEFILE_PATH)/../bin/kprove)
+# and kbmc
+KBMC=$(abspath $(MAKEFILE_PATH)/../bin/kbmc)
 # and kast
 KAST=$(abspath $(MAKEFILE_PATH)/../bin/kast)
 # and keq
@@ -22,33 +24,40 @@ KAST=$(abspath $(MAKEFILE_PATH)/../bin/kast)
 TESTDIR?=tests
 # path to put -kompiled directory in
 DEFDIR?=.
+# path to kompile output directory
+KOMPILED_DIR=$(DEFDIR)/$(notdir $(DEF))-kompiled
 # path relative to current definition of output/input files
 RESULTDIR?=$(TESTDIR)
 # all tests in test directory with matching file extension
 TESTS?=$(wildcard $(TESTDIR)/*.$(EXT))
 PROOF_TESTS?=$(wildcard $(TESTDIR)/*-spec.k)
+BMC_TESTS?=$(wildcard $(TESTDIR)/*-spec-bmc.k)
 SEARCH_TESTS?=$(wildcard $(TESTDIR)/*.$(EXT).search)
 STRAT_TESTS?=$(wildcard $(TESTDIR)/*.strat)
 KAST_TESTS?=$(wildcard $(TESTDIR)/*.kast)
 # default KOMPILE_BACKEND
-KOMPILE_BACKEND?=ocaml
+KOMPILE_BACKEND?=llvm
 
 CHECK=| diff -
+REMOVE_PATHS=| sed 's!'`pwd`'/\(\./\)\{0,1\}!!g'
+CONSIDER_ERRORS=2>&1
 
-.PHONY: kompile krun all clean update-results proofs
+.PHONY: kompile krun all clean update-results proofs bmc
 
 # run all tests
-all: kompile krun proofs searches strat kast
+all: kompile krun proofs bmc searches strat kast
 
 # run only kompile
-kompile: $(DEFDIR)/$(DEF)-kompiled/timestamp
+kompile: $(KOMPILED_DIR)/timestamp
 
-$(DEFDIR)/%-kompiled/timestamp: %.k
+$(KOMPILED_DIR)/timestamp: $(DEF).k
 	$(KOMPILE) $(KOMPILE_FLAGS) --backend $(KOMPILE_BACKEND) $(DEBUG) $< -d $(DEFDIR)
 
 krun: $(TESTS)
 
 proofs: $(PROOF_TESTS)
+
+bmc: $(BMC_TESTS)
 
 searches: $(SEARCH_TESTS)
 
@@ -77,6 +86,20 @@ else
 	$(KPROVE) $@ $(KPROVE_FLAGS) $(DEBUG) -d $(DEFDIR) $(CHECK) $(RESULTDIR)/$(notdir $@).out
 endif
 
+%-broken-spec.k: kompile
+ifeq ($(TESTDIR),$(RESULTDIR))
+	$(KPROVE) $@ $(KPROVE_FLAGS) $(DEBUG) -d $(DEFDIR) $(CONSIDER_ERRORS) $(REMOVE_PATHS) $(CHECK) $@.out
+else
+	$(KPROVE) $@ $(KPROVE_FLAGS) $(DEBUG) -d $(DEFDIR) $(CONSIDER_ERRORS) $(REMOVE_PATHS) $(CHECK) $(RESULTDIR)/$(notdir $@).out
+endif
+
+%-spec-bmc.k: kompile
+ifeq ($(TESTDIR),$(RESULTDIR))
+	$(KBMC) --raw-spec $@ $(KBMC_FLAGS) $(DEBUG) -d $(DEFDIR) --depth 20 $(CHECK) $@.out
+else
+	$(KBMC) --raw-spec $@ $(KBMC_FLAGS) $(DEBUG) -d $(DEFDIR) --depth 20 $(CHECK) $(RESULTDIR)/$(notdir $@).out
+endif
+
 %.search: kompile
 ifeq ($(TESTDIR),$(RESULTDIR))
 	$(KSEARCH) $@ $(KSEARCH_FLAGS) $(DEBUG) -d $(DEFDIR) $(CHECK) $@.out
@@ -99,7 +122,7 @@ else
 endif
 
 clean:
-	rm -rf $(DEFDIR)/$(DEF)-kompiled
+	rm -rf $(KOMPILED_DIR)
 
 .depend:
 	@$(KDEP) $(DEF).k > .depend-tmp

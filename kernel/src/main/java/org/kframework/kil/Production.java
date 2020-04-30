@@ -20,6 +20,7 @@ public class Production extends ASTNode {
      */
     protected List<ProductionItem> items;
     protected Sort sort;
+    protected List<Sort> params;
     protected String ownerModuleName;
     private Multimap<Integer, Integer> binderMap;
 
@@ -79,13 +80,6 @@ public class Production extends ASTNode {
         return items.size() == 1 && items.get(0) instanceof Terminal;
     }
 
-    public Production(Production node) {
-        super(node);
-        this.items = node.items;
-        this.sort = node.sort;
-        this.ownerModuleName = node.ownerModuleName;
-    }
-
     public Production(NonTerminal sort, java.util.List<ProductionItem> items) {
         super();
         this.items = items;
@@ -130,7 +124,7 @@ public class Production extends ASTNode {
                 sorts.add(sort.name());
             }
         }
-        return label + "_" + ownerModuleName + (kore ? "_" + sorts.stream().reduce("", (s1, s2) -> s1 + "_" + s2) : "");
+        return label + "_" + ownerModuleName + (kore ? "_" + sorts.stream().reduce(sort.name(), (s1, s2) -> s1 + "_" + s2) : "");
     }
 
     public java.util.List<ProductionItem> getItems() {
@@ -164,6 +158,14 @@ public class Production extends ASTNode {
 
     public void setSort(Sort sort) {
         this.sort = sort;
+    }
+
+    public List<Sort> getParams() {
+        return params;
+    }
+
+    public void setParams(List<Sort> params) {
+        this.params = params;
     }
 
     public ASTNode getChildNode(int idx) {
@@ -229,17 +231,13 @@ public class Production extends ASTNode {
         return result;
     }
 
-    public String toString() {
-        String content = "";
-        for (ProductionItem i : items)
-            content += i + " ";
-
-        return content;
-    }
-
     @Override
-    public Production shallowCopy() {
-        return new Production(this);
+    public void toString(StringBuilder sb) {
+        for (ProductionItem i : items) {
+            i.toString(sb);
+            sb.append(" ");
+        }
+        sb.append(getAttributes());
     }
 
     public void setOwnerModuleName(String ownerModuleName) {
