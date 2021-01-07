@@ -2,12 +2,12 @@ module SYNC-POINT-CANDIDATES
 
 imports MAIN
 
-rule
+claim
 <s> ~ a => ^ b ... </s>
 <ak> .K </ak>
 [trusted]
 
-rule
+claim
 <s> ~ b => ^ a ... </s>
 <bk> .K </bk>
 [trusted]
@@ -22,7 +22,7 @@ imports SYNC-POINT-CANDIDATES
 syntax Id ::= "n" [token]
 
 // swap if-then-else branch
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <aT>
@@ -34,9 +34,9 @@ rule
       n = n + 1;
     }
   =>
-    _
+    ?_
   </ak>
-  <astate> n |-> N1:Int _ => _ </astate>
+  <astate> n |-> N1:Int _ => ?_ </astate>
 </aT>
 <bT>
   <bk>
@@ -46,13 +46,13 @@ rule
       n = n + 2;
     }
   =>
-    _
+    ?_
   </bk>
-  <bstate> n |-> N2:Int _ => _ </bstate>
+  <bstate> n |-> N2:Int _ => ?_ </bstate>
 </bT>
 requires N1 ==Int N2
 
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <aT>

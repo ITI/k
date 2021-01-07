@@ -1,6 +1,7 @@
 DEF=test
 EXT=test
 TESTDIR=../bytes
+RESULTDIR=../bytes-llvm
 KOMPILE_BACKEND?=haskell
 
-include ../../../include/ktest.mak
+include ../../../include/kframework/ktest.mak

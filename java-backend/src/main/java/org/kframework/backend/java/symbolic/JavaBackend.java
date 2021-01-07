@@ -94,7 +94,7 @@ public class JavaBackend extends AbstractBackend {
                 .andThen(DefinitionTransformer.from(AddBottomSortForListsWithIdenticalLabels.singleton(), "add bottom sorts for lists"))
                 .andThen(d2 -> {
                   ResolveFunctionWithConfig transformer = new ResolveFunctionWithConfig(d2, false);
-                  return DefinitionTransformer.fromSentenceTransformer((m, s) -> new ExpandMacros(transformer, m, files, kompileOptions, false).expand(s), "expand macros").apply(d2);
+                  return DefinitionTransformer.fromSentenceTransformer((m, s) -> new ExpandMacros(transformer, m, files, kem, kompileOptions, false, true).expand(s), "expand macros").apply(d2);
                 })
                 .andThen(DefinitionTransformer.fromSentenceTransformer(new NormalizeAssoc(KORE.c()), "normalize assoc"))
                 .andThen(convertDataStructureToLookup)
@@ -106,7 +106,7 @@ public class JavaBackend extends AbstractBackend {
                 .andThen(DefinitionTransformer.fromSentenceTransformer(JavaBackend::markSingleVariables, "mark single variables"))
                 .andThen(DefinitionTransformer.from(new AssocCommToAssoc(), "convert AC matching to A matching"))
                 .andThen(DefinitionTransformer.from(new MergeRules(MAIN_AUTOMATON, Att.TOP_RULE()), "merge regular rules into one rule with or clauses"))
-                .apply(Kompile.defaultSteps(kompileOptions, kem, files).apply(d));
+                .apply(Kompile.defaultSteps(kompileOptions, kem, files, true).apply(d));
              // .andThen(KoreToMiniToKore::apply) // for serialization/deserialization test
     }
 
@@ -120,15 +120,15 @@ public class JavaBackend extends AbstractBackend {
         return m -> ModuleTransformer.fromSentenceTransformer(Kompile::removePolyKLabels, "remove poly klabels")
                 .andThen(ModuleTransformer.fromSentenceTransformer(new ResolveAnonVar()::resolve, "resolve anonymous varaibles"))
                 .andThen(ModuleTransformer.fromSentenceTransformer(s -> new ResolveSemanticCasts(kompileOptions.backend.equals(Backends.JAVA)).resolve(s), "resolve semantic casts"))
-                .andThen(AddImplicitComputationCell::transformModule)
-                .andThen(ConcretizeCells::transformModule)
-                .andThen(ModuleTransformer.fromRuleBodyTransformer(RewriteToTop::bubbleRewriteToTopInsideCells, "bubble out rewrites below cells"))
                 //.andThen(ModuleTransformer.fromSentenceTransformer(new NormalizeAssoc(KORE.c()), "normalize assoc"))
                 .andThen(AddBottomSortForListsWithIdenticalLabels.singleton())
                 .andThen(m2 -> {
                   ResolveFunctionWithConfig transformer = new ResolveFunctionWithConfig(m2, false);
-                  return ModuleTransformer.fromSentenceTransformer((mod, s) -> new ExpandMacros(transformer, mod, files, kompileOptions, false).expand(s), "expand macros").apply(m2);
+                  return ModuleTransformer.fromSentenceTransformer((mod, s) -> new ExpandMacros(transformer, mod, files, kem, kompileOptions, false, true).expand(s), "expand macros").apply(m2);
                 })
+                .andThen(AddImplicitComputationCell::transformModule)
+                .andThen(ConcretizeCells::transformModule)
+                .andThen(ModuleTransformer.fromRuleBodyTransformer(RewriteToTop::bubbleRewriteToTopInsideCells, "bubble out rewrites below cells"))
                 //.andThen(ModuleTransformer.fromSentenceTransformer(new NormalizeAssoc(KORE.c()), "normalize assoc"))
 
                 //A subset of convertDataStructureToLookup. Does not simplify _Map_ terms.
@@ -141,7 +141,8 @@ public class JavaBackend extends AbstractBackend {
                 .andThen(ModuleTransformer.fromRuleBodyTransformer(JavaBackend::ADTKVariableToSortedVariable, "ADT.KVariable to SortedVariable"))
                 .andThen(ModuleTransformer.fromRuleBodyTransformer(JavaBackend::convertKSeqToKApply, "kseq to kapply"))
                 .andThen(ModuleTransformer.fromRuleBodyTransformer(NormalizeKSeq.self(), "normalize kseq"))
-                .andThen(mod -> JavaBackend.markSpecRules(def, mod))
+                // TODO: remove marking step?
+                .andThen(JavaBackend::markSpecRules)
                 .andThen(ModuleTransformer.fromSentenceTransformer(new AddConfigurationRecoveryFlags()::apply, "add refers_THIS_CONFIGURATION_marker"))
                 //.andThen(ModuleTransformer.fromSentenceTransformer(JavaBackend::markSingleVariables, "mark single variables"))
                 //.andThen(ModuleTransformer.from(new AssocCommToAssoc()::apply, "convert AC matching to A matching"))
@@ -164,9 +165,14 @@ public class JavaBackend extends AbstractBackend {
         return s;
     }
 
-    private static Module markSpecRules(Definition d, Module mod) {
-        ConfigurationInfoFromModule configInfo = new ConfigurationInfoFromModule(d.mainModule());
-        return ModuleTransformer.fromSentenceTransformer(s -> markRegularRules(d, configInfo, s, Att.SPECIFICATION()), "mark specification rules").apply(mod);
+    private static Module markSpecRules(Module mod) {
+        return ModuleTransformer.fromSentenceTransformer(s -> {
+                    if (s instanceof Claim) {
+                        Claim c = (Claim) s;
+                        return Claim.apply(c.body(), c.requires(), c.ensures(), c.att().add(Att.SPECIFICATION()));
+                    }
+                    return s;
+                }, "mark specification rules").apply(mod);
     }
 
         /**
@@ -193,8 +199,8 @@ public class JavaBackend extends AbstractBackend {
      * with a special marker called THE_VARIABLE which the backend uses for special speed optimisations.
      */
     private static Sentence markSingleVariables(Sentence s) {
-        if (s instanceof Rule) {
-            Rule r = (Rule) s;
+        if (s instanceof RuleOrClaim) {
+            RuleOrClaim r = (RuleOrClaim) s;
 
             if (!r.att().contains(Att.TOP_RULE()))
                 return r;
@@ -219,8 +225,7 @@ public class JavaBackend extends AbstractBackend {
                     }
                 }
             };
-
-            return Constructors.Rule(markerAdder.apply(r.body()), markerAdder.apply(r.requires()), markerAdder.apply(r.ensures()), r.att());
+            return ((RuleOrClaim) s).newInstance(markerAdder.apply(r.body()), markerAdder.apply(r.requires()), markerAdder.apply(r.ensures()), r.att());
         } else {
             return s;
         }

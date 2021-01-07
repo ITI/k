@@ -1,6 +1,6 @@
 // Copyright (c) 2018-2019 K Team. All Rights Reserved.
 
-requires "domains.k"
+requires "domains.md"
 
 module A
 
@@ -37,6 +37,6 @@ module A
 
   rule split(X) => bytes2(nth(X,0,2), nth(X,1,2))
 
-  rule merge(bytes2(nth(X,0,2), nth(X,1,2))) => X
+  rule merge(bytes2(nth(X,0,2), nth(X,1,2))) => X [simplification]
 
 endmodule

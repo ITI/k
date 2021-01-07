@@ -8,7 +8,7 @@ import org.kframework.definition.Context;
 import org.kframework.definition.Module;
 import org.kframework.definition.NonTerminal;
 import org.kframework.definition.Production;
-import org.kframework.definition.Rule;
+import org.kframework.definition.RuleOrClaim;
 import org.kframework.definition.Sentence;
 import org.kframework.kore.FoldK;
 import org.kframework.kore.InjectedKLabel;
@@ -23,6 +23,7 @@ import org.kframework.kore.KVariable;
 import org.kframework.kore.Sort;
 import org.kframework.parser.outer.Outer;
 import org.kframework.utils.errorsystem.KEMException;
+import scala.Tuple2;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -36,8 +37,6 @@ import java.util.Set;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-
-import scala.Tuple2;
 
 import static org.kframework.Collections.*;
 import static org.kframework.kore.KORE.*;
@@ -58,25 +57,23 @@ public class AddSortInjections {
     }
 
     public Sentence addInjections(Sentence s) {
-        if (s instanceof Rule) {
-            return addInjections((Rule) s);
-        } else if (s instanceof Context) {
-            return addInjections((Context) s);
+        if (s instanceof RuleOrClaim) {
+            return addInjections((RuleOrClaim) s);
         } else {
             return s;
         }
     }
 
-    public Rule addInjections(Rule rule) {
+    public RuleOrClaim addInjections(RuleOrClaim roc) {
         initSortParams();
-        K body = addTopSortInjections(rule.body());
-        K requires = internalAddSortInjections(rule.requires(), Sorts.Bool());
-        K ensures = internalAddSortInjections(rule.ensures(), Sorts.Bool());
-        Att att = rule.att();
+        K body = addTopSortInjections(roc.body());
+        K requires = internalAddSortInjections(roc.requires(), Sorts.Bool());
+        K ensures = internalAddSortInjections(roc.ensures(), Sorts.Bool());
+        Att att = roc.att();
         if (!sortParams.isEmpty()) {
             att = att.add("sortParams", Set.class, new HashSet<>(sortParams));
         }
-        return new Rule(body, requires, ensures, att);
+        return roc.newInstance(body, requires, ensures, att);
     }
 
     public K addInjections(K term) {
@@ -144,7 +141,17 @@ public class AddSortInjections {
                         if (k.klabel().equals(wrappedLabel)) {
                             if (collectionIsMap(collectionLabel)) {
                                 // Map
-                                return KApply(elementLabel, KList(k.klist().items().get(0), visitChildren(k, actualSort, expectedSort)), Att.empty().add(Sort.class, expectedSort));
+                                K key = k.klist().items().get(0);
+                                Sort adjustedExpectedSort = expectedSort;
+                                if (k.att().contains(Sort.class)) {
+                                    adjustedExpectedSort = k.att().get(Sort.class);
+                                }
+                                Production prod = production(k);
+                                List<K> children = new ArrayList<>();
+                                Production substituted = substituteProd(prod, adjustedExpectedSort, (i, fresh) -> sort(k.items().get(i), fresh.nonterminals().apply(i).sort()), k);
+                                Sort expectedKeySort = substituted.nonterminal(0).sort();
+                                Sort actualKeySort = sort(key, expectedKeySort);
+                                return KApply(elementLabel, KList(visitChildren(key, actualKeySort, expectedKeySort), visitChildren(k, actualSort, expectedSort)), Att.empty().add(Sort.class, expectedSort));
                             } else {
                                 return KApply(elementLabel, KList(visitChildren(k, actualSort, expectedSort)), Att.empty().add(Sort.class, expectedSort));
                             }
@@ -183,7 +190,9 @@ public class AddSortInjections {
             Production substituted = substituteProd(prod, expectedSort, (i, fresh) -> sort(kapp.items().get(i), fresh.nonterminals().apply(i).sort()), kapp);
             for (int i = 0; i < kapp.items().size(); i++) {
                 if (kapp.items().size() != substituted.nonterminals().size()) {
-                    throw KEMException.internalError("Invalid initial configuration with wrong number of children for term with label " + kapp.klabel(), kapp);
+                    throw KEMException.compilerError("Invalid sort predicate " + kapp.klabel() +
+                        " that depends directly or indirectly on the current configuration. " +
+                        "Is it possible to replace the sort predicate with a regular function?", kapp);
                 }
                 Sort expectedSortOfChild = substituted.nonterminal(i).sort();
                 K child = kapp.items().get(i);
@@ -408,7 +417,7 @@ public class AddSortInjections {
           throw KEMException.internalError("KORE does not yet support KLabel variables.", term);
         }
         scala.collection.Set<Production> prods = mod.productionsFor().apply(((KApply) term).klabel().head());
-        if (prods.size() != 1) {
+        if (prods.size() == 0) {
           throw KEMException.compilerError("Could not find production for KApply with label " + term.klabel(), term);
         }
         return prods.head();

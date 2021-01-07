@@ -9,6 +9,7 @@ import org.kframework.compile.ConfigurationInfoFromModule;
 import org.kframework.compile.GenerateSortPredicateSyntax;
 import org.kframework.compile.GenerateSortProjections;
 import org.kframework.definition.Definition;
+import org.kframework.definition.Import;
 import org.kframework.definition.Module;
 import org.kframework.definition.ModuleTransformer;
 import org.kframework.definition.NonTerminal;
@@ -21,6 +22,7 @@ import org.kframework.definition.Terminal;
 import org.kframework.definition.UserList;
 import org.kframework.kore.Sort;
 import org.kframework.parser.inner.ParseInModule;
+import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.file.FileUtil;
 import scala.collection.Seq;
 import scala.Option;
@@ -77,6 +79,7 @@ public class RuleGrammarGenerator {
     public static final String PROGRAM_LISTS = "PROGRAM-LISTS";
     public static final String RULE_LISTS = "RULE-LISTS";
     public static final String RECORD_PRODS = "RECORD-PRODUCTIONS";
+    public static final String SORT_PREDICATES = "SORT-PREDICATES";
 
     public static final String POSTFIX = "-PROGRAM-PARSING";
 
@@ -228,9 +231,11 @@ public class RuleGrammarGenerator {
             }
         }
 
-        for (Sort s : iterable(mod.allSorts())) {
-            prods.addAll(new GenerateSortPredicateSyntax().gen(mod, s));
-            prods.addAll(new GenerateSortProjections(mod).gen(s).collect(Collectors.toSet()));
+        if (mod.importedModuleNames().contains(SORT_PREDICATES)) {
+            for (Sort s : iterable(mod.allSorts())) {
+                prods.addAll(new GenerateSortPredicateSyntax().gen(mod, s));
+                prods.addAll(new GenerateSortProjections(mod).gen(s).collect(Collectors.toSet()));
+            }
         }
 
         for (Production p : iterable(mod.productions())) {
@@ -324,16 +329,10 @@ public class RuleGrammarGenerator {
             // remove cells from parsing config cells so they don't conflict with the production in kast.k
             // also add all matching terminals to the #CellName sort
             for (Sentence prod : extensionProds) {
-              if (prod instanceof Production) {
-                for (ProductionItem pi : iterable(((Production)prod).items())) {
-                  if (pi instanceof Terminal) {
-                    Terminal t = (Terminal)pi;
-                    if (t.value().matches("[A-Za-z][A-Za-z0-9\\-]*")) {
-                      prods.add(Production(Seq(), Sorts.CellName(), Seq(t), Att().add("token")));
-                    }
-                  }
-                }
-              }
+                addCellNameProd(prods, prod);
+            }
+            for (Sentence prod : iterable(mod.productions())) {
+                addCellNameProd(prods, prod);
             }
             parseProds = Stream.concat(prods.stream(), stream(mod.sentences()).filter(s -> !s.att().contains("cell"))).collect(Collectors.toSet());
         } else
@@ -370,40 +369,55 @@ public class RuleGrammarGenerator {
             for (Sort srt : iterable(mod.allSorts())) {
                 if (!isParserSort(srt) && !mod.listSorts().contains(srt)) {
                     // K ::= Sort
-                    prods3.add(Production(Seq(), Sorts.K(), Seq(NonTerminal(srt)), Att()));
+                    prods3.add(Production(Seq(), Sorts.KItem(), Seq(NonTerminal(srt)), Att()));
                 }
             }
             // for each triple, generate a new pattern which works better for parsing lists in programs.
             prods3.addAll(parseProds.stream().collect(Collectors.toSet()));
             java.util.Set<Sentence> res = new HashSet<>();
             for (UserList ul : UserList.getLists(prods3)) {
-                org.kframework.definition.Production prod1, prod2, prod3, prod4, prod5;
+                org.kframework.definition.Production prod1, prod2, prod3 = null, prod4 = null, prod5 = null;
 
                 Att newAtts = ul.attrs.remove("userList");
-                // Es#Terminator ::= "" [klabel('.Es)]
-                prod1 = Production(ul.terminatorKLabel, Sort(ul.sort.name() + "#Terminator", ul.sort.params()), Seq(Terminal("")),
+                if (ul.leftAssoc && ul.nonEmpty) {
+                  prod1 = Production(ul.klabel, ul.sort,
+                          Seq(NonTerminal(ul.sort), Terminal(ul.separator), NonTerminal(ul.childSort)),
+                          newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList));
+                  prod2 = Production(Seq(), ul.sort,
+                          Seq(NonTerminal(ul.childSort)),
+                          newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList).add("userList", ul.klabel.name()).add("userListTerminator", ul.terminatorKLabel.name()));
+                  prod3 = Production(ul.terminatorKLabel, Sort(ul.sort.name() + "#Terminator", ul.sort.params()), Seq(Terminal("")),
                         newAtts.remove("format").add(Att.ORIGINAL_PRD(), Production.class, ul.pTerminator));
-                // Ne#Es ::= E "," Ne#Es [klabel('_,_)]
-                prod2 = Production(ul.klabel, Sort("Ne#" + ul.sort.name(), ul.sort.params()),
-                        Seq(NonTerminal(ul.childSort), Terminal(ul.separator), NonTerminal(Sort("Ne#" + ul.sort.name(), ul.sort.params()))),
-                        newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList));
-                // Ne#Es ::= E "" Es#Terminator [klabel('_,_)]
-                prod3 = Production(ul.klabel, Sort("Ne#" + ul.sort.name(), ul.sort.params()),
-                        Seq(NonTerminal(ul.childSort), Terminal(""), NonTerminal(Sort(ul.sort.name() + "#Terminator", ul.sort.params()))),
-                        newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList));
-                // Es ::= Ne#Es
-                prod4 = Production(Seq(), ul.sort, Seq(NonTerminal(Sort("Ne#" + ul.sort.name(), ul.sort.params()))), Att().add(NOT_INJECTION));
-                // Es ::= Es#Terminator // if the list is *
-                prod5 = Production(Seq(), ul.sort, Seq(NonTerminal(Sort(ul.sort.name() + "#Terminator", ul.sort.params()))), Att().add(NOT_INJECTION));
+                } else if (ul.leftAssoc) {
+                  throw KEMException.compilerError("Cannot use List with --bison-lists", ul.pList);
+                } else {
+                  // Es#Terminator ::= "" [klabel('.Es)]
+                  prod1 = Production(ul.terminatorKLabel, Sort(ul.sort.name() + "#Terminator", ul.sort.params()), Seq(Terminal("")),
+                        newAtts.remove("format").add(Att.ORIGINAL_PRD(), Production.class, ul.pTerminator));
+                  // Ne#Es ::= E "," Ne#Es [klabel('_,_)]
+                  prod2 = Production(ul.klabel, Sort("Ne#" + ul.sort.name(), ul.sort.params()),
+                          Seq(NonTerminal(ul.childSort), Terminal(ul.separator), NonTerminal(Sort("Ne#" + ul.sort.name(), ul.sort.params()))),
+                          newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList));
+                  // Ne#Es ::= E "" Es#Terminator [klabel('_,_)]
+                  prod3 = Production(ul.klabel, Sort("Ne#" + ul.sort.name(), ul.sort.params()),
+                          Seq(NonTerminal(ul.childSort), Terminal(""), NonTerminal(Sort(ul.sort.name() + "#Terminator", ul.sort.params()))),
+                          newAtts.add(Att.ORIGINAL_PRD(), Production.class, ul.pList));
+                  // Es ::= Ne#Es
+                  prod4 = Production(Seq(), ul.sort, Seq(NonTerminal(Sort("Ne#" + ul.sort.name(), ul.sort.params()))), Att().add(NOT_INJECTION));
+                  // Es ::= Es#Terminator // if the list is *
+                  prod5 = Production(Seq(), ul.sort, Seq(NonTerminal(Sort(ul.sort.name() + "#Terminator", ul.sort.params()))), Att().add(NOT_INJECTION));
+                }
 
                 res.add(prod1);
                 res.add(prod2);
                 res.add(prod3);
-                res.add(prod4);
-                res.add(SyntaxSort(Seq(), Sort(ul.sort.name() + "#Terminator", ul.sort.params())));
-                res.add(SyntaxSort(Seq(), Sort("Ne#" + ul.sort.name(), ul.sort.params())));
-                if (!ul.nonEmpty) {
-                    res.add(prod5);
+                if(!ul.leftAssoc) {
+                    res.add(prod4);
+                    res.add(SyntaxSort(Seq(), Sort(ul.sort.name() + "#Terminator", ul.sort.params())));
+                    res.add(SyntaxSort(Seq(), Sort("Ne#" + ul.sort.name(), ul.sort.params())));
+                    if (!ul.nonEmpty) {
+                        res.add(prod5);
+                    }
                 }
             }
             res.addAll(prods3.stream().filter(p -> !(p instanceof Production && (p.att().contains(Att.GENERATED_BY_LIST_SUBSORTING()) || p.att().contains(Att.USER_LIST())))).collect(Collectors.toSet()));
@@ -422,10 +436,29 @@ public class RuleGrammarGenerator {
             parseProds.addAll(res);
             disambProds.addAll(res);
         }
-        Module extensionM = new Module(mod.name() + "-EXTENSION", Set(mod), immutable(extensionProds), mod.att());
-        Module disambM = new Module(mod.name() + "-DISAMB", Set(), immutable(disambProds), mod.att());
-        Module parseM = new Module(mod.name() + "-PARSER", Set(), immutable(parseProds), mod.att());
+        Att att = mod.att();
+        List<String> notLrModules = stream(mod.importedModules()).filter(m -> m.att().contains("not-lr1") && !m.name().endsWith(Import.syntaxString())).map(m -> m.name()).collect(Collectors.toList());
+        if (!notLrModules.isEmpty()) {
+          att = att.add("not-lr1", notLrModules.toString());
+        }
+        Module extensionM = new Module(mod.name() + "-EXTENSION", Set(mod), immutable(extensionProds), att);
+        Module disambM = new Module(mod.name() + "-DISAMB", Set(), immutable(disambProds), att);
+        Module parseM = new Module(mod.name() + "-PARSER", Set(), immutable(parseProds), att);
+        parseM.subsorts();
         return Tuple3.apply(extensionM, disambM, parseM);
+    }
+
+    private static void addCellNameProd(Set<Sentence> prods, Sentence prod) {
+        if (prod instanceof Production) {
+          for (ProductionItem pi : iterable(((Production)prod).items())) {
+            if (pi instanceof Terminal) {
+              Terminal t = (Terminal)pi;
+              if (t.value().matches("[A-Za-z][A-Za-z0-9\\-]*")) {
+                prods.add(Production(Seq(), Sorts.CellName(), Seq(t), Att().add("token")));
+              }
+            }
+          }
+        }
     }
 
     private static List<List<Sort>> makeAllSortTuples(int size, Module mod) {

@@ -10,6 +10,7 @@ import org.apache.commons.lang3.tuple.Pair;
 import org.kframework.attributes.Location;
 import org.kframework.main.GlobalOptions;
 import org.kframework.utils.errorsystem.KEMException;
+import org.kframework.utils.errorsystem.KException.ExceptionType;
 import org.kframework.utils.errorsystem.KExceptionManager;
 import org.kframework.utils.inject.RequestScoped;
 
@@ -82,7 +83,7 @@ public class FileUtil {
             try {
                 FileUtils.deleteDirectory(tempDir);
             } catch (IOException e) {
-                kem.registerCriticalWarning("Failed to delete temporary directory", e);
+                kem.registerCriticalWarning(ExceptionType.UNDELETED_TEMP_DIR, "Failed to delete temporary directory", e);
             }
         }
     }
@@ -154,8 +155,8 @@ public class FileUtil {
         save(resolveTemp(file), content);
     }
 
-    public String loadFromKBase(String file) {
-        return load(resolveKBase(file));
+    public String loadFromKIncludeDir(String file) {
+        return load(resolveKInclude(file));
     }
 
     public File resolveTemp(String file) {
@@ -182,6 +183,11 @@ public class FileUtil {
         return new File(workingDir, file.getPath());
     }
 
+    public File resolveKInclude(String file) {
+        return new File(JarInfo.getKIncludeDir().toFile(), file);
+    }
+
+    // don't use this if you want a file in the include directory. Use resolveKInclude.
     public File resolveKBase(String file) {
         return new File(JarInfo.getKBase(), file);
     }

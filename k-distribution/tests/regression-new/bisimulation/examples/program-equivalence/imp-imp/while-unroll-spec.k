@@ -4,24 +4,24 @@ imports MAIN
 
 syntax Id ::= "n" [token]
 
-rule
+claim
 <s> ~ a => ^ b ... </s>
 <ak> while (_) _ </ak>
 [trusted]
 
-rule
+claim
 <s> ~ a => ^ b ... </s>
 <ak> .K </ak>
 [trusted]
 
-rule
+claim
 <s> ~ b => ^ a ... </s>
 <bk> while (_) _ </bk>
 <bstate> n |-> N:Int _ </bstate>
 requires N modInt 2 ==Int 0
 [trusted]
 
-rule
+claim
 <s> ~ b => ^ a ... </s>
 <bk> .K </bk>
 [trusted]
@@ -34,7 +34,7 @@ imports MAIN
 imports SYNC-POINT-CANDIDATES
 
 // loop unrolling
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <aT>
@@ -43,9 +43,9 @@ rule
       n = n + 2;
     }
   =>
-    _
+    ?_
   </ak>
-  <astate> n |-> N1:Int _ => _ </astate>
+  <astate> n |-> N1:Int _ => ?_ </astate>
 </aT>
 <bT>
   <bk>
@@ -53,14 +53,14 @@ rule
       n = n + 1;
     }
   =>
-    _
+    ?_
   </bk>
-  <bstate> n |-> N2:Int _ => _ </bstate>
+  <bstate> n |-> N2:Int _ => ?_ </bstate>
 </bT>
 requires N1 ==Int N2
  andBool N1 modInt 2 ==Int 0
 
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <aT>

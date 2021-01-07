@@ -11,12 +11,12 @@ imports MAIN
 syntax Id ::= "x" [token]
             | "y" [token]
 
-rule
+claim
 <s> ~ a => ^ b ... </s>
 <impk> _:Int </impk>
 [trusted]
 
-rule
+claim
 <s> ~ b => ^ a ... </s>
 <lambdak> _:Int </lambdak>
 [trusted]
@@ -28,24 +28,24 @@ module SIMPLE-SPEC
 imports VERIFICATION
 imports SYNC-POINT-CANDIDATES
 
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <impT>
-  <impk> addi(x,y) => _ </impk>
+  <impk> addi(x,y) => ?_ </impk>
   <impstate> ... x |-> N1:Int y |-> M1:Int ... </impstate>
 </impT>
 <lambdaT>
-  <lambdak> addl(x,y) => _ </lambdak>
+  <lambdak> addl(x,y) => ?_ </lambdak>
   <lambdaenv> ... x |-> Lx:Int y |-> Ly:Int ... </lambdaenv>
   <lambdastore> ... Lx |-> N2:Int Ly |-> M2:Int ... </lambdastore>
   <lambdacounter> _ </lambdacounter>
 </lambdaT>
 requires N1 ==Int N2
  andBool M1 ==Int M2
- andBool Ks1 ==K Ks2
+ andBool ?_Ks1 ==K ?_Ks2
 
-rule
+claim
 <k> check => . </k>
 <s> ^ a ... </s>
 <impT>

@@ -45,6 +45,7 @@ object Att {
 
   val empty: Att = Att(Map.empty)
 
+  val BRACKET = "bracket"
   val FUNCTION = "function"
   val FUNCTIONAL = "functional"
   val SIMPLIFICATION = "simplification"
@@ -78,6 +79,7 @@ object Att {
   val CELL = "cell"
   val CELL_FRAGMENT = "cellFragment"
   val CELL_OPT_ABSENT = "cellOptAbsent"
+  val MAINCELL = "maincell"
   val IMPURE = "impure"
   val STRICT = "strict"
   val SEQSTRICT = "seqstrict"
@@ -87,6 +89,7 @@ object Att {
   val UNBOUND_VARIABLES = "unboundVariables"
   val BAG = "bag"
   val OWISE = "owise"
+  val PRIORITY = "priority"
   val HEAT = "heat"
   val COOL = "cool"
   val TAG = "tag"
@@ -100,6 +103,8 @@ object Att {
   val TOP_RULE = "topRule";
   val ORIGINAL_PRD = "originalPrd"
   val RECORD_PRD = "recordPrd"
+  val SOURCE = "org.kframework.attributes.Source"
+  val LOCATION = "org.kframework.attributes.Location"
 
   private val stringClassName = classOf[String].getName
 

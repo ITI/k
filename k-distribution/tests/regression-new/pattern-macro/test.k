@@ -8,11 +8,11 @@ syntax Type ::= t(m1: Int, m2: Int, st: SimpleType)
 
 syntax Type ::= "floatingType" | "intType"
 
-rule floatingType => t(?_, ?_, (float #Or double)) [macro]
+rule floatingType => t(_, _, (float #Or double)) [macro, unboundVariables(_)]
 
 rule floatingType => .K
 
-rule intType => t(?Foo, ?Foo, int) [macro]
+rule intType => t(Foo, Foo, int) [macro, unboundVariables(Foo)]
 
 rule intType => .K
 
@@ -22,7 +22,7 @@ syntax KItem ::= RValue
 syntax KItem ::= RHold
 syntax KItem ::= Type
 
-syntax Expression ::= arithOp(K, K) | stuff(K)
+syntax Expression ::= arithOp(K, K) | stuff(K) | Int
 rule arithOp(L:K, R:K) => stuff(L) [macro]
 rule arithOp(L:RValue, R::RValue) => .K
 rule arithOp(te(t(0, 0, int), t(0, 0, int)), R::RValue) => .K

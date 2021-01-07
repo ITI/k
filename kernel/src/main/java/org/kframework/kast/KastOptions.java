@@ -19,6 +19,8 @@ import org.kframework.utils.inject.RequestScoped;
 import org.kframework.utils.options.BaseEnumConverter;
 import org.kframework.utils.options.DefinitionLoadingOptions;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.io.File;
 import java.io.Reader;
 import java.io.StringReader;
@@ -36,6 +38,9 @@ public final class KastOptions {
             return new StringReader(expression);
         }
         checkSingleFile();
+        if (parameters.get(0).equals("-")) {
+          return new BufferedReader(new InputStreamReader(System.in));
+        }
         return files.get().readFromWorkingDirectory(parameters.get(0));
     }
 
@@ -95,10 +100,19 @@ public final class KastOptions {
     @Parameter(names={"--gen-parser"}, description="Generate a Bison/Flex parser for the specified module and sort.")
     public boolean genParser;
 
+    @Parameter(names={"--gen-glr-parser"}, description="Generate a Bison/Flex GLR parser for the specified module and sort.")
+    public boolean genGlrParser;
+
     public File outputFile() {
         checkSingleFile();
         return files.get().resolveWorkingDirectory(parameters.get(0));
     }
+
+    @Parameter(names="--bison-file", description="C file containing functions to link into bison parser.")
+    public String bisonFile;
+
+    @Parameter(names="--bison-stack-max-depth", description="Maximum size of bison parsing stack (default: 10000).")
+    public long bisonStackMaxDepth = 10000;
 
     @Parameter(names={"--expression", "-e"}, description="An expression to parse passed on the command " +
     "line. It is an error to provide both this option and a file to parse.")

@@ -62,12 +62,6 @@ Modify the entire tutorial to use `.` or, if needed, `.::Map`, etc.,
 instead of `.Map`, etc..  Check for each instance specifically, because
 the surrounding text may also need to be modified.
 
-We are still using the `--pdf` option to `kompile` at many places in the
-tutorial, although in some places at the beginning we replaced it with the
-new approach, `kdoc`.  It is actually not clear that we should switch to
-`kdoc`, because after all the Latex generation is still a backend.  So it
-makes sense to implement it as such, instead of as a different tool.
-
 We sometimes use "Kompile", or "kompile", as a verb instead of "Compile",
 or "compile", to indicate that we mean compilation with K.  Similarly for
 "Krun", or "krun", instead of "Run" or "run".
@@ -98,6 +92,3 @@ In the PL semantics book, define print(AExps) to have the same semantics as in
 IMP++: evaluates and prints each of its arguments in order (as opposed to
 first evaluate all of them and then print them---for example, if the second
 argument performs a division by zero, I still want to print the first argument.)
-
-Windows user currently need to replace "kast" with "kast.bat" everywhere in their
-config.xml files.  Hopefully this will be fixed soon.

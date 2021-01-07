@@ -4,6 +4,7 @@ package org.kframework.parser.inner.kernel;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang3.mutable.MutableInt;
 import org.kframework.Collections;
+import org.kframework.TopologicalSort;
 import org.kframework.attributes.Att;
 import org.kframework.backend.kore.ModuleToKORE;
 import org.kframework.definition.Module;
@@ -20,6 +21,8 @@ import org.kframework.kore.Sort;
 import org.kframework.parser.inner.generator.RuleGrammarGenerator;
 import org.kframework.utils.StringUtil;
 import org.kframework.utils.errorsystem.KEMException;
+import org.kframework.utils.errorsystem.KException.ExceptionType;
+import org.kframework.utils.errorsystem.KExceptionManager;
 
 import java.io.File;
 import java.io.IOException;
@@ -113,19 +116,55 @@ public class KSyntax2Bison {
     return Module(module.name(), module.imports(), immutable(sentences), module.att());
   }
 
-  public static void writeParser(Module module, Scanner scanner, Sort start, File path) {
+  public static void writeParser(Module module, Scanner scanner, Sort start, File path, boolean glr, long stackDepth, KExceptionManager kem) {
+    if (!glr && module.att().contains("not-lr1")) {
+        kem.registerInnerParserWarning(ExceptionType.NON_LR_GRAMMAR, "Importing a module that is tagged as not being LR(1) when using Bison's LR(1) parser generator: " + module.att().get("not-lr1"));
+        // print so it appears before we call bison which may not terminate
+        kem.print();
+    }
     module = transformByPriorityAndAssociativity(module);
     StringBuilder bison = new StringBuilder();
     bison.append("%{\n" +
         "#include <stdio.h>\n" +
+        "#include <string.h>\n" +
         "#include \"node.h\"\n" +
         "#include \"parser.tab.h\"\n" +
-        "int yylex(void);\n" +
-        "void yyerror(const char *);\n" +
+        "int yylex(YYSTYPE *, YYLTYPE *, void *);\n" +
+        "void yyerror(YYLTYPE *, void *, const char *);\n" +
         "char *enquote(char *);\n" +
+        "char *injSymbol(char *, char *);\n" +
+        "YYSTYPE mergeAmb(YYSTYPE x0, YYSTYPE x1);\n" +
         "node *result;\n" +
+        "# define YYMAXDEPTH " + stackDepth + "\n" +
+        "# define YYLLOC_DEFAULT(Cur, Rhs, N)                      \\\n" +
+        "do                                                        \\\n" +
+        "  if (N)                                                  \\\n" +
+        "    {                                                     \\\n" +
+        "      (Cur).filename     = YYRHSLOC(Rhs, 1).filename;     \\\n" +
+        "      (Cur).first_line   = YYRHSLOC(Rhs, 1).first_line;   \\\n" +
+        "      (Cur).first_column = YYRHSLOC(Rhs, 1).first_column; \\\n" +
+        "      (Cur).last_line    = YYRHSLOC(Rhs, N).last_line;    \\\n" +
+        "      (Cur).last_column  = YYRHSLOC(Rhs, N).last_column;  \\\n" +
+        "    }                                                     \\\n" +
+        "  else                                                    \\\n" +
+        "    {                                                     \\\n" +
+        "      (Cur).filename     = YYRHSLOC(Rhs, 0).filename;     \\\n" +
+        "      (Cur).first_line   = (Cur).last_line   =            \\\n" +
+        "        YYRHSLOC(Rhs, 0).last_line;                       \\\n" +
+        "      (Cur).first_column = (Cur).last_column =            \\\n" +
+        "        YYRHSLOC(Rhs, 0).last_column;                     \\\n" +
+        "    }                                                     \\\n" +
+        "while (0)\n" +
         "%}\n\n");
-    bison.append("%define api.value.type union\n");
+    bison.append("%define api.value.type {union value_type}\n");
+    bison.append("%define api.pure\n");
+    bison.append("%define lr.type ielr\n");
+    bison.append("%lex-param {void *scanner} \n");
+    bison.append("%parse-param {void *scanner} \n");
+    bison.append("%locations\n");
+    if (glr) {
+      bison.append("%glr-parser\n");
+    }
     bison.append("%define parse.error verbose\n");
     for (int kind : scanner.kinds()) {
       TerminalLike tok = scanner.getTokenByKind(kind);
@@ -135,10 +174,28 @@ public class KSyntax2Bison {
       } else {
         val = ((RegexTerminal)tok).regex();
       }
-      bison.append("%token <char *> TOK_" + kind + " " + (kind+1) + " " + StringUtil.enquoteCString(val) + "\n");
+      bison.append("%token TOK_" + kind + " " + (kind+1) + " " + StringUtil.enquoteCString(val) + "\n");
     }
-    for (Sort sort : iterable(module.allSorts())) {
-      bison.append("%nterm <node *> ");
+
+    //compute sorts reachable from start symbol
+    Map<Sort, List<Production>> prods = stream(module.productions()).collect(Collectors.groupingBy(p -> p.sort()));
+    Set<Sort> reachableSorts = new HashSet<>();
+    Deque<Sort> workList = new ArrayDeque<>();
+    workList.offer(start);
+    do {
+      Sort s = workList.poll();
+      if (reachableSorts.add(s)) {
+        List<Production> prodsForSort = prods.getOrDefault(s, java.util.Collections.<Production>emptyList());
+        for (Production prod : prodsForSort) {
+          for (NonTerminal nt : iterable(prod.nonterminals())) {
+            workList.offer(nt.sort());
+          }
+        }
+      }
+    } while (!workList.isEmpty());
+
+    for (Sort sort : reachableSorts) {
+      bison.append("%nterm ");
       encode(sort, bison);
       bison.append("\n");
     }
@@ -147,23 +204,22 @@ public class KSyntax2Bison {
     bison.append("\n%%\n");
     bison.append("top: ");
     encode(start, bison);
-    bison.append(" { result = $1; } ;\n");
-    Map<Sort, List<Production>> prods = stream(module.productions()).collect(Collectors.groupingBy(p -> p.sort()));
-    for (Sort sort : iterable(module.allSorts())) {
+    bison.append(" { result = $1.nterm; } ;\n");
+    for (Sort sort : reachableSorts) {
       encode(sort, bison);
       bison.append(":\n");
       String conn = "";
       for (Production prod : Optional.ofNullable(prods.get(sort)).orElse(java.util.Collections.emptyList())) {
         bison.append("  " + conn);
-        processProduction(prod, module, scanner, bison);
+        processProduction(prod, module, scanner, bison, glr);
         conn = "|";
       }
       bison.append(";\n");
     }
     bison.append("\n%%\n");
     bison.append("\n" +
-        "void yyerror (const char *s) {\n" +
-        "    fprintf (stderr, \"%s\\n\", s);\n" +
+        "void yyerror (YYLTYPE *loc, void *scanner, const char *s) {\n" +
+        "    fprintf (stderr, \"%d:%d:%d:%d:%s\\n\", loc->first_line, loc->first_column, loc->last_line, loc->last_column, s);\n" +
         "}\n");
     try {
       FileUtils.write(path, bison);
@@ -187,7 +243,86 @@ public class KSyntax2Bison {
     sb.append("_");
   }
 
-  private static void processProduction(Production prod, Module module, Scanner scanner, StringBuilder bison) {
+  private static void appendOverloadCondition(StringBuilder bison, Module module, Production greater, Production lesser, List<Integer> nts) {
+    bison.append("true");
+    for (int i = 0; i < nts.size(); i++) {
+      boolean hasSameSort = lesser.nonterminals().apply(i).sort().equals(greater.nonterminals().apply(i).sort());
+      if (!hasSameSort) {
+        bison.append(" && strncmp($").append(nts.get(i)).append(".nterm->symbol, \"inj{\", 4) == 0 && (false");
+        Sort greaterSort = lesser.nonterminals().apply(i).sort();
+        for (Sort lesserSort : iterable(module.subsorts().elements())) {
+          if (module.subsorts().lessThanEq(lesserSort, greaterSort)) {
+            bison.append(" || strcmp($").append(nts.get(i)).append(".nterm->children[0]->sort, \"");
+            encodeKore(lesserSort, bison);
+            bison.append("\") == 0");
+          }
+        }
+        bison.append(")");
+      }
+    }
+  }
+
+  private static void appendOverloadChecks(StringBuilder bison, Module module, Production greater, List<Integer> nts, boolean hasLocation) {
+    for (Production lesser : iterable(TopologicalSort.tsort(module.overloads().directRelations()))) {
+      if (module.overloads().lessThan(lesser, greater)) {
+        bison.append("  if (");
+        appendOverloadCondition(bison, module, greater, lesser, nts);
+        bison.append(") {\n" +
+            "    n->symbol =\"");
+        encodeKore(lesser.klabel().get(), bison);
+        bison.append("\";\n" +
+            "    n->sort = \"");
+        encodeKore(lesser.sort(), bison);
+        boolean hasLesserLocation = module.sortAttributesFor().get(lesser.sort().head()).getOrElse(() -> Att.empty()).contains("locations");
+        bison.append("\";\n" +
+            "    n->hasLocation = " + (hasLesserLocation ? "1" : "0") + ";\n");
+        for (int i = 0; i < nts.size(); i++) {
+          boolean hasSameSort = lesser.nonterminals().apply(i).sort().equals(greater.nonterminals().apply(i).sort());
+          if (hasSameSort) {
+            bison.append(
+                "    n->children[").append(i).append("] = $").append(nts.get(i)).append(".nterm;\n");
+          } else {
+            bison.append(
+                "    {\n" +
+                "      node *origChild = $").append(nts.get(i)).append(".nterm;\n" +
+                "      char *lesserSort = \"");
+            encodeKore(lesser.nonterminals().apply(i).sort(), bison);
+            bison.append("\";\n" +
+                "      if (strcmp(origChild->children[0]->sort, lesserSort) == 0) {\n" +
+                "        n->children[").append(i).append("] = origChild->children[0];\n" +
+                "      } else {\n" +
+                "        node *inj = malloc(sizeof(node) + sizeof(node *));\n" +
+                "        inj->symbol = injSymbol(origChild->children[0]->sort, lesserSort);\n" +
+                "        inj->str = false;\n" +
+                "        inj->location = origChild->location;\n" +
+                "        inj->nchildren = 1;\n" +
+                "        inj->sort = lesserSort;\n" +
+                "        inj->hasLocation = origChild->hasLocation;\n" +
+                "        inj->children[0] = origChild->children[0];\n" +
+                "        n->children[").append(i).append("] = inj;\n" +
+                "      }\n" +
+                "    }\n");
+          }
+        }
+        bison.append(
+            "    node *n2 = malloc(sizeof(node) + sizeof(node *));\n" +
+            "    n2->str = false;\n" +
+            "    n2->location = @$;\n" +
+            "    n2->nchildren = 1;\n" +
+            "    n2->sort = \"");
+        encodeKore(greater.sort(), bison);
+        bison.append("\";\n" +
+            "    n2->hasLocation = " + (hasLocation ? "1" : "0") + ";\n" +
+            "    n2->symbol = injSymbol(n->sort, n2->sort);\n" +
+            "    n2->children[0] = n;\n" +
+            "    value_type result = {.nterm = n2};\n" +
+            "    $$ = result;\n" +
+            "  } else");
+      }
+    }
+  }
+
+  private static void processProduction(Production prod, Module module, Scanner scanner, StringBuilder bison, boolean glr) {
     int i = 1;
     List<Integer> nts = new ArrayList<>();
     for (ProductionItem item : iterable(prod.items())) {
@@ -207,6 +342,7 @@ public class KSyntax2Bison {
       i++;
     }
     prod = prod.att().getOptional(Att.ORIGINAL_PRD(), Production.class).orElse(prod);
+    boolean hasLocation = module.sortAttributesFor().get(prod.sort().head()).getOrElse(() -> Att.empty()).contains("locations");
     if (prod.att().contains("token") && !prod.isSubsort()) {
       bison.append("{\n" +
           "  node *n = malloc(sizeof(node));\n" +
@@ -215,65 +351,144 @@ public class KSyntax2Bison {
       if (!isString) {
         bison.append("enquote(");
       }
-      bison.append("$1");
+      bison.append("$1.token");
       if (!isString) {
         bison.append(")");
       }
       bison.append(";\n" +
           "  n->str = true;\n" +
+          "  n->location = @$;\n" +
+          "  n->hasLocation = 0;\n" +
           "  n->nchildren = 0;\n" +
           "  node *n2 = malloc(sizeof(node) + sizeof(node *));\n" +
           "  n2->symbol = \"\\\\dv{");
       encodeKore(prod.sort(), bison);
       bison.append("}\";\n" +
+          "  n2->sort = \"");
+      encodeKore(prod.sort(), bison);
+      bison.append("\";\n" +
           "  n2->str = false;\n" +
+          "  n2->location = @$;\n" +
+          "  n2->hasLocation = " + (hasLocation ? "1" : "0") + ";\n" +
           "  n2->nchildren = 1;\n" +
           "  n2->children[0] = n;\n" +
-          "  $$ = n2;\n" +
+          "  value_type result = {.nterm = n2};\n" +
+          "  $$ = result;\n" +
           "}\n");
     } else if (!prod.att().contains("token") && prod.isSubsort() && !prod.att().contains(RuleGrammarGenerator.NOT_INJECTION)) {
       bison.append("{\n" +
           "  node *n = malloc(sizeof(node) + sizeof(node *));\n" +
-          "  n->symbol = \"inj{");
+          "  n->str = false;\n" +
+          "  n->location = @$;\n" +
+          "  n->hasLocation = " + (hasLocation ? "1" : "0") + ";\n" +
+          "  n->nchildren = 1;\n" +
+          "  n->sort = \"");
+      encodeKore(prod.sort(), bison);
+      bison.append("\";\n" +
+          "  if (!$1.nterm->str && strncmp($1.nterm->symbol, \"inj{\", 4) == 0) {\n" +
+          "    char *childSort = $1.nterm->children[0]->sort;\n" +
+          "    n->symbol = injSymbol(childSort, n->sort);\n" +
+          "    n->children[0] = $1.nterm->children[0];\n" +
+          "  } else {\n" +
+          "    n->symbol = \"inj{");
       encodeKore(prod.getSubsortSort(), bison);
       bison.append(", ");
       encodeKore(prod.sort(), bison);
       bison.append("}\";\n" +
-          "  n->str = false;\n" +
-          "  n->nchildren = 1;\n" +
-          "  n->children[0] = $1;\n" +
-          "  $$ = n;\n" +
+          "    n->children[0] = $1.nterm;\n" +
+          "  }\n");
+      if (prod.att().contains("userListTerminator")) {
+        KLabel nil = KLabel(prod.att().get("userListTerminator"));
+        KLabel cons = KLabel(prod.att().get("userList"));
+        bison.append(
+          "  node *n2 = malloc(sizeof(node));\n" +
+          "  n2->symbol = \"");
+        encodeKore(nil, bison);
+        bison.append("\";\n" +
+          "  n2->str = false;\n" +
+          "  n2->location = @$;\n" +
+          "  n2->hasLocation = 0;\n" +
+          "  n2->nchildren = 0;\n" +
+          "  n2->sort = \"");
+        encodeKore(prod.sort(), bison);
+        bison.append("\";\n" +
+          "  node *n3 = malloc(sizeof(node) + 2*sizeof(node *));\n" +
+          "  n3->symbol = \"");
+        encodeKore(cons, bison);
+        bison.append("\";\n" +
+          "  n3->str = false;\n" +
+          "  n3->location = @$;\n" +
+          "  n3->hasLocation = " + (hasLocation ? "1" : "0") + ";\n" +
+          "  n3->nchildren = 2;\n" +
+          "  n3->children[0] = n2;\n" +
+          "  n3->children[1] = $1.nterm;\n" +
+          "  n3->sort = \"");
+        encodeKore(prod.getSubsortSort(), bison);
+        bison.append("\";\n" +
+          "  value_type result = {.nterm = n3};\n" +
+          "  $$ = result;\n" +
           "}\n");
+      } else {
+        bison.append("  value_type result = {.nterm = n};\n" +
+          "  $$ = result;\n" +
+          "}\n");
+      }
+
     } else if (prod.att().contains("token") && prod.isSubsort()) {
       bison.append("{\n" +
           "  node *n = malloc(sizeof(node) + sizeof(node *));\n" +
           "  n->symbol = \"\\\\dv{");
       encodeKore(prod.sort(), bison);
       bison.append("}\";\n" +
+          "  n->sort = \"");
+      encodeKore(prod.sort(), bison);
+      bison.append("\";\n" +
           "  n->str = false;\n" +
+          "  n->location = @$;\n" +
+          "  n->hasLocation = " + (hasLocation ? "1" : "0") + ";\n" +
           "  n->nchildren = 1;\n" +
-          "  n->children[0] = $1->children[0];\n" +
-          "  $$ = n;\n" +
+          "  n->children[0] = $1.nterm->children[0];\n" +
+          "  value_type result = {.nterm = n};\n" +
+          "  $$ = result;\n" +
           "}\n");
     } else if (prod.klabel().isDefined()) {
       bison.append("{\n" +
           "  node *n = malloc(sizeof(node) + sizeof(node *)*").append(nts.size()).append(");\n" +
-          "  n->symbol = \"");
+          "  n->str = false;\n" +
+          "  n->location = @$;\n" +
+          "  n->nchildren = ").append(nts.size()).append(";\n");
+      appendOverloadChecks(bison, module, prod, nts, hasLocation);
+      bison.append("{\n" +
+          "    n->symbol = \"");
       encodeKore(prod.klabel().get(), bison);
       bison.append("\";\n" +
-          "  n->str = false;\n" +
-          "  n->nchildren = ").append(nts.size()).append(";\n");
+          "    n->sort = \"");
+      encodeKore(prod.sort(), bison);
+      bison.append("\";\n" +
+          "    n->hasLocation = " + (hasLocation ? "1" : "0") + ";\n");
       for (i = 0; i < nts.size(); i++) {
         bison.append(
-          "  n->children[").append(i).append("] = $").append(nts.get(i)).append(";\n");
+          "    n->children[").append(i).append("] = $").append(nts.get(i)).append(".nterm;\n");
       }
       bison.append(
-          "  $$ = n;\n" +
+          "    value_type result = {.nterm = n};\n" +
+          "    $$ = result;\n" +
+          "  }\n" +
           "}\n");
-    } else if (prod.att().contains("bracket")) {
+    } else if (prod.att().contains(Att.BRACKET())) {
       bison.append("{\n" +
           "  $$ = $").append(nts.get(0)).append(";\n" +
           "}\n");
+    }
+    if (glr) {
+      bison.append("%merge <mergeAmb> ");
+      if (prod.att().contains("prefer")) {
+        bison.append("%dprec 3\n");
+      } else if (prod.att().contains("avoid")) {
+        bison.append("%dprec 1\n");
+      } else {
+        bison.append("%dprec 2\n");
+      }
     }
     bison.append("\n");
   }

@@ -92,8 +92,6 @@ States:
  - Secondary States: (switch based on grammar context)
    - ATTR_STATE: used in body of Attributes (SPECIAL_TOKEN include whitespace)
    - TAG_STATE: used in body of Tags
-   - REGEX_STATE: used in body of RegEx (SPECIAL_TOKEN includes whitespace)
-   - GROUP_STATE: used in body of Group (i.e., a character class)
 
  - Tertiary States: (switch for one token)
    - MODNAME_STATE: used after "module", "imports"
@@ -160,6 +158,7 @@ import org.kframework.kil.NonTerminal;
 import org.kframework.kil.SortSynonym;
 import org.kframework.kil.StringSentence;
 import org.kframework.kil.Syntax;
+import org.kframework.kil.SyntaxLexical;
 import org.kframework.kil.Terminal;
 import org.kframework.kil.UserList;
 import org.kframework.kil.loader.Context;
@@ -413,6 +412,7 @@ PARSER_END(Outer)
   <RULE: "rule"> : BUBBLE_STATE
 | <CONTEXT: "context"> : CONTEXT_STATE
 | <CONFIGURATION: "configuration"> : BUBBLE_STATE
+| <CLAIM: "claim"> : BUBBLE_STATE
 
 | <SYNTAX: "syntax">
 | <ENDMODULE: "endmodule">
@@ -420,6 +420,7 @@ PARSER_END(Outer)
 | <PRIORITY: "priority"> : KLABEL_STATE
 | <PRIORITIES: "priorities"> : KLABEL_STATE
 | <NON_ASSOC: "non-assoc"> // : KLABEL_STATE
+| <LEXICAL: "lexical">
 
 | <MODULE: "module"> : MODNAME_STATE
 | <IMPORTS: "imports"> : MODNAME_STATE
@@ -451,8 +452,6 @@ PARSER_END(Outer)
 
 | "List"
 | "NeList"
-| "Lexer"
-| "Token"
 
 | "require"
 | "requires"
@@ -467,7 +466,7 @@ Token unlike the default UPPER_ID.
 */
 void UpperId() : {}
 {
-  <UPPER_ID> | "List" | "NeList" | "Lexer" | "Token"
+  <UPPER_ID> | "List" | "NeList"
 }
 
 /** Parses a string literal and returns the decoded value of that string. */
@@ -508,7 +507,7 @@ Sort SimpleSort() : { String str; Sort sort; List<Sort> params = new ArrayList<S
 | <NAT> { str = image(); return Sort(str, params); }
 }
 
-/** Parses and returns a NonTerminal but not a List, NeList, Lexer, or Token */
+/** Parses and returns a NonTerminal but not a List or NeList */
 NonTerminal SimpleSortID() : { Location loc = startLoc(); Sort sort; Optional<String> name = Optional.empty(); }
 {
   (LOOKAHEAD((<UPPER_ID> | <LOWER_ID>) ":")
@@ -555,6 +554,7 @@ NonTerminal SortID() : { NonTerminal nonTerminal; }
 | "endmodule"     { matchedToken.kind = ENDMODULE; } : DEFAULT
 
 | "rule"          { matchedToken.kind = RULE;    } : BUBBLE_STATE
+| "claim"         { matchedToken.kind = CLAIM;   } : BUBBLE_STATE
 | "configuration" { matchedToken.kind = CONFIGURATION;  } : BUBBLE_STATE
 | "context"       { matchedToken.kind = CONTEXT; } : CONTEXT_STATE
 
@@ -591,6 +591,7 @@ StringSentence Bubble(String type) :
 | "endmodule"     { matchedToken.kind = ENDMODULE; } : DEFAULT
 
 | "rule"          { matchedToken.kind = RULE;    } : BUBBLE_STATE
+| "claim"         { matchedToken.kind = CLAIM;   } : BUBBLE_STATE
 | "configuration" { matchedToken.kind = CONFIGURATION;  } : BUBBLE_STATE
 | "context"       { matchedToken.kind = CONTEXT; } : CONTEXT_STATE
 
@@ -606,95 +607,6 @@ List<Tag> KLabels() :
   (<KLABEL> { list.add(new Tag(image())); })+
   // TODO: check if need context
   { return list; }
-}
-
-/**** RegEx ****/
-
-<REGEX_STATE> SPECIAL_TOKEN: {
-  <([" ", "\t", "\r", "\n"])+>
-| <REGEX_COMMENT: <COMMENT>> {}
-}
-
-<REGEX_STATE> TOKEN:
-{
-  <ID: ["A"-"Z"](["a"-"z", "A"-"Z", "0"-"9"])*>
-| <REGEX_STRING: <STRING>> { matchedToken.kind = STRING; }
-| "(" { matchedToken.kind = LPAREN; }
-| ")" { matchedToken.kind = RPAREN; }
-| "{" { matchedToken.kind = LCURLY; }
-| "}" { matchedToken.kind = RCURLY; }
-| "[" { matchedToken.kind = LSQUARE; }
-| "]" { matchedToken.kind = RSQUARE; }
-| "+" { matchedToken.kind = PLUS; }
-| "*" { matchedToken.kind = TIMES; }
-| "?" { matchedToken.kind = QUESTION; }
-| "~" { matchedToken.kind = TILDE; }
-| <PIPE: "|">
-}
-
-/** Parses a complete RegEx and returns it as a String */
-String RegEx(StringBuilder follow): { StringBuilder reg = new StringBuilder(); }
-{ (Element(reg, follow))+ {
-    String regEx = reg.toString();
-    if (!regEx.endsWith("*") && !regEx.endsWith("+") && !regEx.endsWith("?"))
-        follow.setLength(0);
-    return reg.toString(); } }
-
-/** Parses a single RegEx Element and appends it to 'sb' */
-void Element(StringBuilder reg, StringBuilder follow) :
-{ StringBuilder sb = new StringBuilder(); }
-{
-  { follow.setLength(0); }
-  BasicElement(sb, follow)
-  (<PIPE> { sb.append(specialAndImage()); } BasicElement(sb, follow) { follow.setLength(0); })*
-  { reg.append(sb); }
-}
-
-/** Parses a single RegEx BasicElement and appends it to 'sb' */
-void BasicElement(StringBuilder sb, StringBuilder follow) : {}
-{
-( <STRING>  { sb.append(specialAndImage()); follow.setLength(0); }
-| <ID>      { sb.append(StringUtil.escapeSort(specialAndImage())+"Dz"); follow.setLength(0); }
-| Group(sb, REGEX_STATE) { follow.append(sb); }
-| "{"       { sb.append(specialAndImage()); }
-  Element(sb, follow)
-  <STRING>  { sb.append(specialAndImage()); }
-  "}" { sb.append(specialAndImage()); }
-  (("+" | "*") { sb.append(specialAndImage()); follow.setLength(0); })
-| "("       { sb.append(specialAndImage()); }
-  (Element(sb, follow))*
-  ")"       { sb.append(specialAndImage()); follow.setLength(0); }
-) (("+" | "*" | "?" ) { sb.append(specialAndImage()); })*
-}
-
-/*** RegEx Character Groups */
-
-<GROUP_STATE> TOKEN:
-{ <GROUP: ( ["a"-"z", "A"-"Z", "0"-"9"]
-          | "-" | "\t" | "\n" | "\r" | " "
-          | "\\" ["t", "n", "r", " "]
-          | "\\" ~["a"-"z", "A"-"Z", "\t"])*>
-    { if (image.length() > 0)
-      if (image.charAt(0) == '-' ||
-    		(image.charAt(image.length() - 1) == '-'
-    		 && image.charAt(image.length() - 2) != '\\')) {
-        throw new TokenMgrError(
-          "Lexical error at line " + matchedToken.beginLine +
-          ", column " + matchedToken.beginColumn + ". Found \"-\" at " +
-          (image.charAt(0) == '-' ? "start" : "end") +
-          " of character group in regular expression.",
-          TokenMgrError.LEXICAL_ERROR);
-      }
-    }
-}
-
-/** Parses a single character group and appends it to 'sb' */
-void Group(StringBuilder sb, int state) : {}
-{
-  "~"      { sb.append(specialAndImage()); } Group(sb, state)
-| "["      { sb.append(specialAndImage()); SwitchTo(GROUP_STATE); }
-  (<GROUP> { sb.append(specialAndImage()); })? { SwitchTo(state); }
-  "]"      { sb.append(specialAndImage()); }
 }
 
 /*** Attributes ***/
@@ -814,7 +726,7 @@ void Sentence(Module module) :
   Sort param;
   List<Tag> list; }
 {
-  ("rule" | LOOKAHEAD("context" <ALIAS>) "context" <ALIAS> | "configuration" | "context")
+  ("rule" | "claim" | LOOKAHEAD("context" <ALIAS>) "context" <ALIAS> | "configuration" | "context")
   { type = image();
     // Note that we must change the "type"
     if (type.equals("configuration")) { type = "config"; } }
@@ -838,6 +750,8 @@ void Sentence(Module module) :
   | ("left" | "right" | "non-assoc") { SwitchTo(KLABEL_STATE); type = image(); }
       list = KLabels()
     { module.appendModuleItem(markLoc(loc, new PriorityExtendedAssoc(type, list))); }
+  | "lexical" (nonTerminal = SortID()) "=" (str = StringRegex())
+    { module.appendModuleItem(markLoc(loc, new SyntaxLexical(nonTerminal.getSort().name(), str))); }
   )
 }
 

@@ -1,11 +1,13 @@
 // Copyright (c) 2016-2019 K Team. All Rights Reserved.
 package org.kframework.compile.checks;
 
+import org.kframework.definition.Claim;
 import org.kframework.definition.Module;
-import org.kframework.definition.Rule;
+import org.kframework.definition.RuleOrClaim;
 import org.kframework.definition.Sentence;
 import org.kframework.kore.K;
 import org.kframework.kore.KApply;
+import org.kframework.kore.KAs;
 import org.kframework.kore.KRewrite;
 import org.kframework.kore.KVariable;
 import org.kframework.kore.VisitK;
@@ -26,15 +28,17 @@ public class CheckRewrite {
     }
 
     public void check(Sentence sentence) {
-        if (sentence instanceof Rule) {
-            check(((Rule) sentence).body());
+        if (sentence instanceof RuleOrClaim) {
+            check(((RuleOrClaim) sentence).body(), sentence instanceof Claim);
         }
     }
 
-    private void check(K body) {
+    private void check(K body, boolean isClaim) {
         class Holder {
             boolean hasRewrite = false;
             boolean inRewrite = false;
+            boolean inRewriteRHS = false;
+            boolean inAs = false;
             boolean inFunctionContext = false;
             boolean inFunctionBody = false;
         }
@@ -43,16 +47,33 @@ public class CheckRewrite {
             @Override
             public void apply(KRewrite k) {
                 boolean inRewrite = h.inRewrite;
+                boolean inRewriteRHS = h.inRewriteRHS;
                 if (h.inRewrite) {
                     errors.add(KEMException.compilerError("Rewrites are not allowed to be nested.", k));
                 }
                 if (h.inFunctionContext) {
                     errors.add(KEMException.compilerError("Rewrites are not allowed in the context of a function rule.", k));
                 }
+                if (h.inAs) {
+                    errors.add(KEMException.compilerError("Rewrites are not allowed inside an #as pattern.", k));
+                }
                 h.hasRewrite = true;
                 h.inRewrite = true;
-                super.apply(k);
+                super.apply(k.left());
+                h.inRewriteRHS = true;
+                super.apply(k.right());
+                h.inRewriteRHS = inRewriteRHS;
                 h.inRewrite = inRewrite;
+            }
+
+            @Override
+            public void apply(KAs k) {
+                boolean inAs = h.inAs;
+                if (h.inRewriteRHS)
+                    errors.add(KEMException.compilerError("#as is not allowed in the RHS of a rule.", k));
+                h.inAs = true;
+                super.apply(k);
+                h.inAs = inAs;
             }
 
             @Override
@@ -117,7 +138,7 @@ public class CheckRewrite {
                 }
             }
         }.accept(body);
-        if (!h.hasRewrite) {
+        if (!h.hasRewrite && !isClaim) {
             errors.add(KEMException.compilerError("Rules must have at least one rewrite.", body));
         }
     }

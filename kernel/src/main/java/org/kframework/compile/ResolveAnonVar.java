@@ -4,7 +4,7 @@ package org.kframework.compile;
 import org.kframework.attributes.Att;
 import org.kframework.definition.Context;
 import org.kframework.definition.ContextAlias;
-import org.kframework.definition.Rule;
+import org.kframework.definition.RuleOrClaim;
 import org.kframework.definition.Sentence;
 import org.kframework.kore.*;
 
@@ -17,6 +17,12 @@ public class ResolveAnonVar {
 
     public static KVariable ANON_VAR = KVariable("_");
     public static KVariable FRESH_ANON_VAR = KVariable("?_");
+    public static KVariable FRESH_ANON_CONSTANT = KVariable("!_");
+    public static KVariable FRESH_LIST_VAR = KVariable("@_");
+
+    public static boolean isAnonVar(KVariable var) {
+        return var.equals(ANON_VAR) || var.equals(FRESH_ANON_VAR) || var.equals(FRESH_ANON_CONSTANT) || var.equals(FRESH_LIST_VAR);
+    }
 
     private Set<KVariable> vars = new HashSet<>();
 
@@ -25,12 +31,12 @@ public class ResolveAnonVar {
         counter = 0;
     }
 
-    private Rule resolve(Rule rule) {
+    private RuleOrClaim resolve(RuleOrClaim rule) {
         resetVars();
         gatherVars(rule.body());
         gatherVars(rule.requires());
         gatherVars(rule.ensures());
-        return new Rule(
+        return rule.newInstance(
                 transform(rule.body()),
                 transform(rule.requires()),
                 transform(rule.ensures()),
@@ -64,8 +70,8 @@ public class ResolveAnonVar {
     }
 
     public synchronized Sentence resolve(Sentence s) {
-        if (s instanceof Rule) {
-            return resolve((Rule) s);
+        if (s instanceof RuleOrClaim) {
+            return resolve((RuleOrClaim) s);
         } else if (s instanceof Context) {
             return resolve((Context) s);
         } else if (s instanceof ContextAlias) {
@@ -90,10 +96,16 @@ public class ResolveAnonVar {
             @Override
             public K apply(KVariable k) {
                 if (ANON_VAR.equals(k)) {
-                    return newDotVariable(false);
+                    return newDotVariable("");
                 }
                 if (FRESH_ANON_VAR.equals(k)) {
-                    return newDotVariable(true);
+                    return newDotVariable("?");
+                }
+                if (FRESH_ANON_CONSTANT.equals(k)) {
+                    return newDotVariable("!");
+                }
+                if (FRESH_LIST_VAR.equals(k)) {
+                    return newDotVariable("@");
                 }
                 return super.apply(k);
             }
@@ -101,14 +113,14 @@ public class ResolveAnonVar {
     }
 
     private int counter = 0;
-    KVariable newDotVariable(boolean isFresh) {
+    KVariable newDotVariable(String prefix) {
         KVariable newLabel;
         Att att = Att().add("anonymous");
-        if (isFresh) {
+        if (prefix.equals("?")) {
             att = att.add("fresh");
         }
         do {
-            newLabel = KVariable("_" + (counter++), att);
+            newLabel = KVariable(prefix + "_" + (counter++), att);
         } while (vars.contains(newLabel));
         vars.add(newLabel);
         return newLabel;

@@ -30,6 +30,9 @@ object Constructors {
   def SortSynonym(newSort: Sort, oldSort: Sort) = definition.SortSynonym(newSort, oldSort)
   def SortSynonym(newSort: Sort, oldSort: Sort, att: attributes.Att) = definition.SortSynonym(newSort, oldSort, att)
 
+  def SyntaxLexical(name: String, regex: String) = definition.SyntaxLexical(name, regex)
+  def SyntaxLexical(name: String, regex: String, att: attributes.Att) = definition.SyntaxLexical(name, regex, att)
+
   def Production(params: Seq[Sort], sort: Sort, items: Seq[ProductionItem]) = definition.Production(params, sort, items, Att.empty)
   def Production(params: Seq[Sort], sort: Sort, items: Seq[ProductionItem], att: attributes.Att) = definition.Production(params, sort, items, att)
   def Production(klabel: KLabel, sort: Sort, items: Seq[ProductionItem]) = definition.Production(klabel, klabel.params, sort, items)
@@ -56,6 +59,9 @@ object Constructors {
 
   def ContextAlias(content: K, requires: K) = definition.ContextAlias(content, requires)
   def ContextAlias(content: K, requires: K, att: attributes.Att) = definition.ContextAlias(content, requires, att)
+
+  def Claim(body: K, requires: K, ensures: K, att: attributes.Att) = definition.Claim(body, requires, ensures, att)
+  def Claim(body: K, requires: K, ensures: K) = definition.Claim(body, requires, ensures, Att.empty)
 
   def Rule(body: K, requires: K, ensures: K, att: attributes.Att) = definition.Rule(body, requires, ensures, att)
   def Rule(body: K, requires: K, ensures: K) = definition.Rule(body, requires, ensures, Att.empty)

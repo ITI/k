@@ -4,6 +4,7 @@ package org.kframework.parser.inner.disambiguation;
 
 import com.google.common.collect.Sets;
 import org.kframework.POSet;
+import org.kframework.attributes.Att;
 import org.kframework.builtin.Sorts;
 import org.kframework.compile.AddSortInjections;
 import org.kframework.definition.Module;
@@ -114,10 +115,8 @@ public class AddEmptyLists extends SetsGeneralTransformer<KEMException, KEMExcep
             Sort childSort = getSort(child, expectedSort);
             if (listSorts.contains(expectedSort) &&
                     !(subsorts.lessThanEq(childSort, expectedSort) && listSorts.contains(childSort))) {
-                final boolean isBracket = child.production().att().contains("bracket");
-                if (isBracket
-                        || (child.production().klabel().isDefined()
-                        && child.production().klabel().get().name().equals("#KRewrite"))) {
+                final boolean isBracket = child.production().att().contains(Att.BRACKET());
+                if (isBracket) {
                     newItems.add(child);
                 } else if (childSort.equals(Sorts.K()) || !subsorts.lessThan(childSort, expectedSort)) {
                     newItems.add(child);
@@ -136,7 +135,12 @@ public class AddEmptyLists extends SetsGeneralTransformer<KEMException, KEMExcep
                     UserList ulTerm = lists.get(leastTerm.iterator().next()).get(0);
                     TermCons terminator = TermCons.apply(ConsPStack.empty(), ulTerm.pTerminator, child.location(), child.source());
                     // TermCons with PStack requires the elements to be in the reverse order
-                    TermCons newTc = TermCons.apply(ConsPStack.from(Arrays.asList(terminator, child)), ul.pList, child.location(), child.source());
+                    TermCons newTc;
+                    if (ul.leftAssoc) {
+                        newTc = TermCons.apply(ConsPStack.from(Arrays.asList(child, terminator)), ul.pList, child.location(), child.source());
+                    } else {
+                        newTc = TermCons.apply(ConsPStack.from(Arrays.asList(terminator, child)), ul.pList, child.location(), child.source());
+                    }
                     newItems.add(newTc);
                     changed = true;
                 }

@@ -21,7 +21,9 @@ import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.Character;
+import java.util.List;
+import java.util.ArrayList;
+import java.util.Arrays;
 
 import javax.json.Json;
 import javax.json.JsonObject;
@@ -62,16 +64,17 @@ public class KRead {
         }
     }
 
-    public void createBisonParser(Module mod, Sort sort, File outputFile) {
+    public void createBisonParser(Module mod, Sort sort, File outputFile, boolean glr, String bisonFile, long stackDepth) {
         try (ParseInModule parseInModule = RuleGrammarGenerator.getCombinedGrammar(mod, true)) {
             try (Scanner scanner = parseInModule.getScanner()) {
                 File scannerFile = files.resolveTemp("scanner.l");
+                File scanHdr = files.resolveTemp("scanner.h");
                 File parserFile = files.resolveTemp("parser.y");
                 scanner.writeStandaloneScanner(scannerFile);
-                KSyntax2Bison.writeParser(parseInModule.getParsingModule(), scanner, sort, parserFile);
+                KSyntax2Bison.writeParser(parseInModule.getParsingModule(), scanner, sort, parserFile, glr, stackDepth, kem);
                 int exit = files.getProcessBuilder()
                   .directory(files.resolveTemp("."))
-                  .command("flex", "-w", scannerFile.getAbsolutePath())
+                  .command("flex", "--header-file=" + scanHdr.getAbsolutePath(), "-w", scannerFile.getAbsolutePath())
                   .inheritIO()
                   .start()
                   .waitFor();
@@ -87,14 +90,20 @@ public class KRead {
                 if (exit != 0) {
                     throw KEMException.internalError("bison returned nonzero exit code: " + exit + "\n");
                 }
-                exit = files.getProcessBuilder()
-                  .command("gcc",
-                      files.resolveKBase("include/cparser/main.c").getAbsolutePath(),
+                List<String> command = new ArrayList<>();
+                command.addAll(Arrays.asList(
+                      "gcc",
+                      files.resolveKInclude("cparser/main.c").getAbsolutePath(),
                       files.resolveTemp("lex.yy.c").getAbsolutePath(),
                       files.resolveTemp("parser.tab.c").getAbsolutePath(),
                       "-iquote", files.resolveTemp(".").getAbsolutePath(),
-                      "-iquote", files.resolveKBase("include/cparser").getAbsolutePath(),
-                      "-o", outputFile.getAbsolutePath())
+                      "-iquote", files.resolveKInclude("cparser").getAbsolutePath(),
+                      "-o", outputFile.getAbsolutePath()));
+                if (bisonFile != null) {
+                    command.add(files.resolveWorkingDirectory(bisonFile).getAbsolutePath());
+                }
+                exit = files.getProcessBuilder()
+                  .command(command.toArray(new String[0]))
                   .inheritIO()
                   .start()
                   .waitFor();

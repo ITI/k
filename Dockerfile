@@ -27,6 +27,11 @@ RUN    apt-get update        \
         z3                   \
         zlib1g-dev
 
+RUN curl -sL https://deb.nodesource.com/setup_10.x | bash -
+RUN    apt-get update               \
+    && apt-get upgrade --yes        \
+    && apt-get install --yes nodejs
+
 RUN curl -sSL https://get.haskellstack.org/ | sh
 
 ARG USER_ID=1000
@@ -49,7 +54,7 @@ ENV LD_LIBRARY_PATH=/usr/local/lib
 ENV PATH=/home/user/hub-linux-amd64-2.14.0/bin:$PATH
 
 ADD k-distribution/src/main/scripts/bin/k-configure-opam-dev k-distribution/src/main/scripts/bin/k-configure-opam-common /home/user/.tmp-opam/bin/
-ADD k-distribution/src/main/scripts/lib/opam                                                                             /home/user/.tmp-opam/lib/opam/
+ADD k-distribution/src/main/scripts/lib/opam                                                                             /home/user/.tmp-opam/lib/kframework/opam/
 RUN    cd /home/user                        \
     && ./.tmp-opam/bin/k-configure-opam-dev
 

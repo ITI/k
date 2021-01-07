@@ -34,8 +34,8 @@ public class KLabels {
     public static final KLabel STRATEGY_CELL = KLabel("<s>");
     public static final KLabel STUCK = KLabel("#STUCK");
 
-    public static final KLabel ML_FALSE = KLabel("#False");
-    public static final KLabel ML_TRUE = KLabel("#True");
+    public static final KLabel ML_FALSE = KLabel("#Bottom");
+    public static final KLabel ML_TRUE = KLabel("#Top");
     public static final KLabel ML_OR = KLabel("#Or");
     public static final KLabel ML_AND = KLabel("#And");
     public static final KLabel ML_NOT = KLabel("#Not");
@@ -47,6 +47,7 @@ public class KLabels {
     public static final KLabel ML_FORALL = KLabel("#Forall");
     public static final KLabel CTL_AG = KLabel("#AG");
     public static final KLabel RL_wEF = KLabel("weakExistsFinally");
+    public static final KLabel RL_wAF = KLabel("weakAlwaysFinally");
 
     public static final KLabel ListItem = KLabel("ListItem");
     public static final KLabel List = KLabel("_List_");

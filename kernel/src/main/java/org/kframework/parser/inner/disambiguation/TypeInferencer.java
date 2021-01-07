@@ -1,6 +1,7 @@
 // Copyright (c) 2019 K Team. All Rights Reserved.
 package org.kframework.parser.inner.disambiguation;
 
+import org.kframework.POSet;
 import org.kframework.attributes.Att;
 import org.kframework.Collections;
 import org.kframework.TopologicalSort;
@@ -96,9 +97,12 @@ public class TypeInferencer implements AutoCloseable {
         version = version.substring("(:version \"".length());
         version = version.substring(0, version.indexOf('"'));
         String[] parts = version.split("\\.");
+        // example of version string:
+        // "4.8.8 - build hashcode ad55a1f1c617"
         int major = Integer.valueOf(parts[0]);
         int minor = Integer.valueOf(parts[1]);
-        if (major < 4 || (major == 4 && minor < 6)) {
+        int patch = Integer.valueOf(parts[2].split(" ")[0]);
+        if (major < 4 || (major == 4 && minor < 6) || (major == 4 && minor == 8 && patch == 9)) {
           destroyOnReset = true;
         } else {
           destroyOnReset = false;
@@ -130,27 +134,39 @@ public class TypeInferencer implements AutoCloseable {
    * @param mod
    */
   private void push(Module mod) {
-    int i = 0;
-    for (Sort s : iterable(TopologicalSort.tsort(mod.syntacticSubsorts().directRelations()))) {
-      if (!isRealSort(s.head())) {
-        continue;
-      }
-      ordinals.put(s.head(), i++);
-    }
-
     // declare Sort datatype
     print("(declare-datatypes () ((Sort ");
     for (SortHead s : sorts) {
       print("(|Sort" + s.name() + "| ");
-      for (i = 0; i < s.params(); i++) {
+      for (int i = 0; i < s.params(); i++) {
         print("(|Sort" + s.name() + "_" + i++ + "| Sort) ");
       }
       println(")");
     }
     println(")))");
+    makeSubsorts(mod, "<=Sort", mod.subsorts());
+    makeSubsorts(mod, "<=SortSyntax", mod.syntacticSubsorts());
+
+    if (DEBUG) {
+      debugPrelude = sb.toString();
+    }
+  }
+
+  private void makeSubsorts(Module mod, String name, POSet<Sort> relations) {
+    // map from each sort to an integer representing the topological sorting of the sorts. higher numbers mean greater
+    // sorts
+    Map<SortHead, Integer> ordinals = new HashMap<>();
+    int i = 0;
+
+    for (Sort s : iterable(TopologicalSort.tsort(relations.directRelations()))) {
+      if (!isRealSort(s.head())) {
+        continue;
+      }
+      ordinals.put(s.head(), i++);
+    }
     // provide fixed interpretation of subsort relation
-    println("(define-fun <=Sort ((s1 Sort) (s2 Sort)) Bool (or");
-    for (Tuple2<Sort, Set<Sort>> relation : stream(mod.syntacticSubsorts().relations()).sorted(Comparator.comparing(t -> -ordinals.getOrDefault(t._1().head(), 0))).collect(Collectors.toList())) {
+    println("(define-fun " + name + " ((s1 Sort) (s2 Sort)) Bool (or");
+    for (Tuple2<Sort, Set<Sort>> relation : stream(relations.relations()).sorted(Comparator.comparing(t -> -ordinals.getOrDefault(t._1().head(), 0))).collect(Collectors.toList())) {
       if (!isRealSort(relation._1().head())) {
         continue;
       }
@@ -177,16 +193,9 @@ public class TypeInferencer implements AutoCloseable {
       println("))");
     }
     println("))");
-    if (DEBUG) {
-      debugPrelude = sb.toString();
-    }
   }
 
   private String debugPrelude;
-
-  // map from each sort to an integer representing the topological sorting of the sorts. higher numbers mean greater
-  // sorts
-  private final Map<SortHead, Integer> ordinals = new HashMap<>();
 
   // list of names for variables and sort parameters in z3
   private final List<String> variables = new ArrayList<>();
@@ -346,7 +355,7 @@ public class TypeInferencer implements AutoCloseable {
       return Optional.empty();
     }
     ProductionReference child = (ProductionReference)t;
-    while (child.production().att().contains("bracket")) {
+    while (child.production().att().contains(Att.BRACKET())) {
       if (((TermCons)child).get(0) instanceof Ambiguity) {
         return Optional.empty();
       }
@@ -358,7 +367,7 @@ public class TypeInferencer implements AutoCloseable {
       }
       child = (ProductionReference)((TermCons)child).get(0);
     }
-    while (child.production().att().contains("bracket")) {
+    while (child.production().att().contains(Att.BRACKET())) {
       if (((TermCons)child).get(0) instanceof Ambiguity) {
         return Optional.empty();
       }
@@ -641,7 +650,7 @@ public class TypeInferencer implements AutoCloseable {
     }
 
     boolean isAnonVar(Constant var) {
-      return var.value().equals(ResolveAnonVar.ANON_VAR.name()) || var.value().equals(ResolveAnonVar.FRESH_ANON_VAR.name());
+      return ResolveAnonVar.isAnonVar(KVariable(var.value()));
     }
 
     /**
@@ -832,7 +841,7 @@ public class TypeInferencer implements AutoCloseable {
     java.util.Set<String> realVariables = new HashSet<>(variables);
     realVariables.removeAll(parameters);
     for (String var : realVariables) {
-      print("(<=Sort   |" + var + "| ");
+      print("(<=SortSyntax   |" + var + "| ");
       printSort(model.get(var));
       print(") ");
     }
@@ -908,7 +917,6 @@ public class TypeInferencer implements AutoCloseable {
     parameters.clear();
     variablesById.clear();
     cacheById.clear();
-    ordinals.clear();
     nextId = 0;
     if (destroyOnReset) {
       z3.close();

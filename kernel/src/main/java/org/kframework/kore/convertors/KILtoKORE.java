@@ -18,6 +18,7 @@ import org.kframework.kil.Module;
 import org.kframework.kil.NonTerminal;
 import org.kframework.kil.Production;
 import org.kframework.kil.Terminal;
+import org.kframework.kore.KLabel;
 import org.kframework.utils.errorsystem.KEMException;
 import scala.Tuple2;
 import scala.collection.JavaConverters;
@@ -44,17 +45,20 @@ public class KILtoKORE extends KILTransformation<Object> {
     private final boolean syntactic;
     private final boolean kore;
     private String moduleName;
+    private final boolean bisonLists;
 
-    public KILtoKORE(org.kframework.kil.loader.Context context, boolean syntactic, boolean kore) {
+    public KILtoKORE(org.kframework.kil.loader.Context context, boolean syntactic, boolean kore, boolean bisonLists) {
         this.context = context;
         this.syntactic = syntactic;
         this.kore = kore;
+        this.bisonLists = bisonLists;
     }
 
     public KILtoKORE(org.kframework.kil.loader.Context context) {
         this.context = context;
         this.syntactic = false;
         kore = false;
+        bisonLists = false;
     }
 
     public FlatModule toFlatModule(Module m) {
@@ -65,14 +69,18 @@ public class KILtoKORE extends KILTransformation<Object> {
                 .filter(j -> !(j instanceof org.kframework.kil.Import))
                 .flatMap(j -> apply(j).stream()).collect(Collectors.toSet());
 
-        Set<String> importedModuleNames = m.getItems().stream()
+        Set<org.kframework.definition.Import> importedModuleNames = m.getItems().stream()
                 .filter(imp -> imp instanceof Import)
-                .map(imp -> ((Import) imp).getName())
+                .map(imp -> apply((Import)imp))
                 .collect(Collectors.toSet());
 
         Att att = convertAttributes(m);
 
         return new FlatModule(moduleName, immutable(importedModuleNames), immutable(items), att);
+    }
+
+    public org.kframework.definition.Import apply(Import imp) {
+        return org.kframework.definition.Import.apply(imp.getName(), convertAttributes(imp));
     }
 
     public org.kframework.definition.Definition apply(Definition d) {
@@ -119,6 +127,11 @@ public class KILtoKORE extends KILTransformation<Object> {
     public org.kframework.definition.Sentence apply(SortSynonym synonym) {
       return new org.kframework.definition.SortSynonym(synonym.newSort, synonym.oldSort, convertAttributes(synonym));
     }
+
+    public org.kframework.definition.Sentence apply(SyntaxLexical lexical) {
+      return new org.kframework.definition.SyntaxLexical(lexical.name, lexical.regex, convertAttributes(lexical));
+    }
+
 
     public org.kframework.definition.Bubble apply(StringSentence sentence) {
         org.kframework.attributes.Att attrs =
@@ -231,6 +244,9 @@ public class KILtoKORE extends KILTransformation<Object> {
                     }
 
                     org.kframework.attributes.Att attrs = convertAttributes(p);
+                    if (attrs.contains(Att.BRACKET())) {
+                      attrs = attrs.add("bracketLabel", KLabel.class, KLabel(p.getBracketLabel(kore), immutable(p.getParams())));
+                    }
 
                     org.kframework.definition.Production prod;
                     if (p.getKLabel(kore) == null)
@@ -300,9 +316,15 @@ public class KILtoKORE extends KILTransformation<Object> {
         org.kframework.definition.Production prod1, prod3;
 
         // Es ::= E "," Es
-        prod1 = Production(KLabel(p.getKLabel(kore), immutable(p.getParams())), sort,
-                Seq(NonTerminal(elementSort), Terminal(userList.getSeparator()), NonTerminal(sort)),
-                attrs.add("right"));
+        if (bisonLists) {
+          prod1 = Production(KLabel(p.getKLabel(kore), immutable(p.getParams())), sort,
+                  Seq(NonTerminal(sort), Terminal(userList.getSeparator()), NonTerminal(elementSort)),
+                  attrs.add("left"));
+        } else {
+          prod1 = Production(KLabel(p.getKLabel(kore), immutable(p.getParams())), sort,
+                  Seq(NonTerminal(elementSort), Terminal(userList.getSeparator()), NonTerminal(sort)),
+                  attrs.add("right"));
+        }
 
 
         // Es ::= ".Es"

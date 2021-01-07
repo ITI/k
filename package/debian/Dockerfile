@@ -4,6 +4,10 @@ ARG BASE_IMAGE
 
 ARG LLVM_VERSION=8
 
+ENV TZ America/Chicago
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN if [ "$BASE_IMAGE" = "debian:buster" ]; then echo "Enabling backports..."; echo "deb http://deb.debian.org/debian buster-backports main" > /etc/apt/sources.list.d/buster-backports.list; fi
 RUN    apt-get update            \
     && apt-get install --yes     \
         bison                    \
@@ -41,7 +45,7 @@ RUN    groupadd -g $GROUP_ID user                     \
 USER $USER_ID:$GROUP_ID
 
 ADD k-distribution/src/main/scripts/bin/k-configure-opam-dev k-distribution/src/main/scripts/bin/k-configure-opam-common /home/user/.tmp-opam/bin/
-ADD k-distribution/src/main/scripts/lib/opam                                                                             /home/user/.tmp-opam/lib/opam/
+ADD k-distribution/src/main/scripts/lib/opam                                                                             /home/user/.tmp-opam/lib/kframework/opam/
 RUN    cd /home/user                        \
     && ./.tmp-opam/bin/k-configure-opam-dev
 

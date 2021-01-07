@@ -16,11 +16,11 @@ import org.fusesource.jansi.AnsiConsole;
 import org.kframework.kast.KastFrontEnd;
 import org.kframework.kbmc.KBMCFrontEnd;
 import org.kframework.kdep.KDepFrontEnd;
-import org.kframework.kdoc.KDocFrontEnd;
 import org.kframework.keq.KEqFrontEnd;
 import org.kframework.kompile.KompileFrontEnd;
 import org.kframework.kprove.KProveFrontEnd;
 import org.kframework.krun.KRunFrontEnd;
+import org.kframework.ksearchpattern.KSearchPatternFrontEnd;
 import org.kframework.kserver.KServerFrontEnd;
 import org.kframework.utils.errorsystem.KEMException;
 import org.kframework.utils.errorsystem.KExceptionManager;
@@ -161,15 +161,6 @@ public class Main {
                         }
                     }
                     break;
-                case "-kdoc":
-                    modules.addAll(KDocFrontEnd.getModules());
-                    for (KModule kModule : kModules) {
-                        List<Module> ms = kModule.getKDocModules();
-                        if (ms != null) {
-                            modules.addAll(ms);
-                        }
-                    }
-                    break;
                 case "-kast":
                     modules.addAll(KastFrontEnd.getModules());
                     for (KModule kModule : kModules) {
@@ -181,6 +172,9 @@ public class Main {
                     break;
                 case "-kdep":
                     modules = KDepFrontEnd.getModules();
+                    break;
+                case "-k-compile-search-pattern":
+                    modules = KSearchPatternFrontEnd.getModules();
                     break;
                 case "-krun":
                     modules.addAll(KRunFrontEnd.getModules());

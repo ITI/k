@@ -113,6 +113,16 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
 
   lazy val productions: Set[Production] = sentences collect { case p: Production => p }
 
+  lazy val functions: Set[KLabel] = productions.filter(_.att.contains(Att.FUNCTION)).map(_.klabel.get.head)
+
+  def isFunction(t: K): Boolean = {
+    t match {
+      case Unapply.KApply(lbl, _) if functions(lbl) => true
+      case Unapply.KRewrite(Unapply.KApply(lbl, _), _) if functions(lbl) => true
+      case _ => false
+    }
+  }
+
   lazy val sortedProductions: Seq[Production] = productions.toSeq.sorted
 
   lazy val localProductions: Set[Production] = localSentences collect { case p: Production => p }
@@ -134,13 +144,20 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
       .groupBy(_.sort.head)
       .map { case (l, ps) => (l, ps) }
 
+  lazy val productionsForLoc: Map[(Source, Location), Set[Production]] =
+    productions
+      .filter(_.source.isPresent)
+      .filter(_.location.isPresent)
+      .groupBy(p => (p.source.get, p.location.get))
+      .map { case (l, ps) => (l, ps) }
+
   lazy val layouts: Set[String] =
     productionsForSort
       .get(Sorts.Layout.head)
       .getOrElse(Set[Production]())
       .collect({
           case Production(_, _, _, Seq(RegexTerminal(_, terminalRegex, _)), _) => terminalRegex
-          case p => throw KEMException.compilerError("Productions of sort `Layout` must be exactly one `RegexTerminal`.\nProduction: " + p.toString())
+          case p => throw KEMException.compilerError("Productions of sort `#Layout` must be exactly one `RegexTerminal`.", p)
       })
 
   lazy val layout: String = "(" + layouts.mkString(")|(") + ")"
@@ -191,7 +208,7 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
 
   lazy val bracketProductionsFor: Map[Sort, List[Production]] =
     productions
-      .collect({ case p if p.att.contains("bracket") => p })
+      .collect({ case p if p.att.contains(Att.BRACKET) => p })
       .groupBy(_.sort)
       .map { case (s, ps) => (s, ps.toList.sortBy(_.sort)(subsorts.asOrdering)) }
 
@@ -199,7 +216,9 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
 
   def isSort(klabel: KLabel, s: Sort) = subsorts.<(sortFor(klabel), s)
 
+  lazy val claims: Set[Claim] = sentences collect { case c: Claim => c }
   lazy val rules: Set[Rule] = sentences collect { case r: Rule => r }
+  lazy val rulesAndClaims: Set[RuleOrClaim] = Set[RuleOrClaim]().++(claims).++(rules)
   lazy val rulesFor: Map[KLabel, Set[Rule]] = rules.groupBy(r => {
     r.body match {
       case Unapply.KApply(Unapply.KLabel("#withConfig"), Unapply.KApply(s, _) :: _) => s
@@ -214,6 +233,8 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
   lazy val sortedRules: Seq[Rule] = rules.toSeq.sorted
 
   lazy val localRules: Set[Rule] = localSentences collect { case r: Rule => r }
+  lazy val localClaims: Set[Claim] = localSentences collect { case r: Claim => r }
+  lazy val localRulesAndClaims: Set[RuleOrClaim] = Set[RuleOrClaim]().++(localClaims).++(localRules)
 
   // Check that productions with the same klabel have identical attributes
   //  productionsFor.foreach {
@@ -237,6 +258,7 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
 
   lazy val sortDeclarations: Set[SyntaxSort] = sentences.collect({ case s: SyntaxSort => s })
   lazy val sortSynonyms: Set[SortSynonym] = sentences.collect({ case s: SortSynonym => s })
+  lazy val lexicalIdentifiers: Set[SyntaxLexical] = sentences.collect({ case s: SyntaxLexical => s })
 
   lazy val sortSynonymMap: Map[Sort, Sort] = sortSynonyms.map(s => (s.newSort, s.oldSort)).toMap
 
@@ -330,29 +352,9 @@ case class Module(val name: String, val imports: Set[Module], localSentences: Se
     case m: Module => m.name == name && m.sentences == sentences
   }
 
-  def flattened()   : FlatModule                = new FlatModule(name, imports.map(m => m.name), localSentences, att)
+  def flattened()   : FlatModule                = new FlatModule(name, imports.map(m => Import(m.name, Att.empty)), localSentences, att)
   def flatModules() : (String, Set[FlatModule]) = (name, Set(flattened) ++ imports.map(m => m.flatModules._2).flatten)
 }
-
-object Import {
-  val syntaxString = "$SYNTAX"
-
-  def isSyntax(name: String): Boolean = name.endsWith(syntaxString)
-
-  def asSyntax(name: String): String =
-    if (isSyntax(name))
-      name
-    else
-      name ++ syntaxString
-
-  def noSyntax(name: String): String =
-    if (isSyntax(name))
-      name.dropRight(syntaxString.length)
-    else
-      name
-}
-
-// hooked but different from core, Import is a sentence here
 
 trait HasAtt {
   val att: Att
@@ -382,11 +384,25 @@ case class ContextAlias(body: K, requires: K, att: Att = Att.empty) extends Sent
   override def withAtt(att: Att) = ContextAlias(body, requires, att)
 }
 
-
-case class Rule(body: K, requires: K, ensures: K, att: Att = Att.empty) extends Sentence with RuleToString with OuterKORE {
+abstract class RuleOrClaim extends Sentence {
+  def body: K
+  def requires: K
+  def ensures: K
   override val isSyntax = false
   override val isNonSyntax = true
-  override def withAtt(att: Att) = Rule(body, requires, ensures, att)
+  def newInstance(body: K, requires: K, ensures: K, att: Att = Att.empty): RuleOrClaim
+}
+
+case class Claim(body: K, requires: K, ensures: K, att: Att = Att.empty) extends RuleOrClaim with ClaimToString with OuterKORE {
+  override def withAtt(att: Att): Claim = Claim(body, requires, ensures, att)
+  override def newInstance(body: K, requires: K, ensures: K, att: Att = Att.empty): Claim =
+    Claim(body, requires, ensures, att)
+}
+
+case class Rule(body: K, requires: K, ensures: K, att: Att = Att.empty) extends RuleOrClaim with RuleToString with OuterKORE {
+  override def withAtt(att: Att): Rule = Rule(body, requires, ensures, att)
+  override def newInstance(body: K, requires: K, ensures: K, att: Att = Att.empty): Rule =
+    Rule(body, requires, ensures, att)
 }
 
 object Rule {
@@ -450,6 +466,13 @@ case class SortSynonym(newSort: Sort, oldSort: Sort, att: Att = Att.empty) exten
   override val isSyntax = true
   override val isNonSyntax = false
   override def withAtt(att: Att) = SortSynonym(newSort, oldSort, att)
+}
+case class SyntaxLexical(name: String, regex: String, att: Att = Att.empty) extends Sentence
+  with SyntaxLexicalToString with OuterKORE {
+
+  override val isSyntax = true
+  override val isNonSyntax = false
+  override def withAtt(att: Att) = SyntaxLexical(name, regex, att)
 }
 
 case class Production(klabel: Option[KLabel], params: Seq[Sort], sort: Sort, items: Seq[ProductionItem], att: Att)
@@ -557,7 +580,7 @@ case class Production(klabel: Option[KLabel], params: Seq[Sort], sort: Sort, ite
 }
 
 object Production {
-  implicit val ord = new Ordering[Production] {
+  implicit val ord: Ordering[Production] = new Ordering[Production] {
     def compare(a: Production, b: Production): Int = {
       Ordering[Option[String]].compare(a.klabel.map(_.name), b.klabel.map(_.name))
     }

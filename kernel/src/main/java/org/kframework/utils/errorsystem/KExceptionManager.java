@@ -14,7 +14,9 @@ import org.kframework.utils.inject.RequestScoped;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 
 @RequestScoped
 public class KExceptionManager {
@@ -55,48 +57,48 @@ public class KExceptionManager {
             registerInternal(e, false);
     }
 
-    public void registerCompilerWarning(String message) {
-        register(ExceptionType.WARNING, KExceptionGroup.COMPILER, message, null, null, null);
+    public void registerCompilerWarning(ExceptionType type, String message) {
+        register(type, KExceptionGroup.COMPILER, message, null, null, null);
     }
 
-    public void registerCompilerWarning(String message, HasLocation node) {
-        register(ExceptionType.WARNING, KExceptionGroup.COMPILER, message, null, node.location().orElse(null), node.source().orElse(null));
+    public void registerCompilerWarning(ExceptionType type, Set<KEMException> errors, String message, HasLocation node) {
+        register(errors, type, KExceptionGroup.COMPILER, message, null, node.location().orElse(null), node.source().orElse(null));
     }
 
-    public void registerCriticalWarning(String message) {
-        register(ExceptionType.WARNING, KExceptionGroup.CRITICAL, message, null, null, null);
+    public void registerCompilerWarning(ExceptionType type, String message, HasLocation node) {
+        register(type, KExceptionGroup.COMPILER, message, null, node.location().orElse(null), node.source().orElse(null));
     }
 
-    public void registerCriticalHiddenWarning(String message) {
-        register(ExceptionType.HIDDENWARNING, KExceptionGroup.CRITICAL, message, null, null, null);
+    public void registerCriticalWarning(ExceptionType type, String message) {
+        register(type, KExceptionGroup.CRITICAL, message, null, null, null);
     }
 
-    public void registerCriticalWarning(String message, Throwable e) {
-        register(ExceptionType.WARNING, KExceptionGroup.CRITICAL, message, e, null, null);
+    public void registerCriticalWarning(ExceptionType type, String message, Throwable e) {
+        register(type, KExceptionGroup.CRITICAL, message, e, null, null);
     }
 
-    public void registerCriticalWarning(String message, HasLocation node) {
-        register(ExceptionType.WARNING, KExceptionGroup.CRITICAL, message, null, node.location().orElse(null), node.source().orElse(null));
+    public void registerCriticalWarning(ExceptionType type, String message, HasLocation node) {
+        register(type, KExceptionGroup.CRITICAL, message, null, node.location().orElse(null), node.source().orElse(null));
     }
 
-    public void registerInternalWarning(String message) {
-        register(ExceptionType.WARNING, KExceptionGroup.INTERNAL, message, null, null, null);
+    public void registerInternalWarning(ExceptionType type, String message) {
+        register(type, KExceptionGroup.INTERNAL, message, null, null, null);
     }
 
-    public void registerInternalWarning(String message, Throwable e) {
-        register(ExceptionType.WARNING, KExceptionGroup.INTERNAL, message, e, null, null);
+    public void registerInternalWarning(ExceptionType type, String message, HasLocation node) {
+        register(type, KExceptionGroup.INTERNAL, message, null, node.location().orElse(null), node.source().orElse(null));
     }
 
-    public void registerInternalHiddenWarning(String message, Throwable e) {
-        register(ExceptionType.HIDDENWARNING, KExceptionGroup.INTERNAL, message, e, null, null);
+    public void registerInternalWarning(ExceptionType type, String message, Throwable e) {
+        register(type, KExceptionGroup.INTERNAL, message, e, null, null);
     }
 
-    public void registerInternalHiddenWarning(String message) {
-        register(ExceptionType.HIDDENWARNING, KExceptionGroup.INTERNAL, message, null, null, null);
+    public void registerOuterParserWarning(ExceptionType type, String message, Throwable e, Source source, Location location) {
+        register(type, KExceptionGroup.OUTER_PARSER, message, e, location, source);
     }
 
-    public void registerInternalHiddenWarning(String message, HasLocation node) {
-        register(ExceptionType.HIDDENWARNING, KExceptionGroup.INTERNAL, message, null, node.location().orElse(null), node.source().orElse(null));
+    public void registerInnerParserWarning(ExceptionType type, String message) {
+        register(type, KExceptionGroup.INNER_PARSER, message, null, null, null);
     }
 
     private void register(ExceptionType type, KExceptionGroup group, String message,
@@ -104,8 +106,21 @@ public class KExceptionManager {
         registerInternal(new KException(type, group, message, source, location, e), true);
     }
 
+    private void register(Set<KEMException> errors, ExceptionType type, KExceptionGroup group, String message,
+                          Throwable e, Location location, Source source) {
+        if (!options.includesExceptionType(type))
+            return;
+        KException exception = new KException(type, group, message, source, location, e);
+        if (exception.type == ExceptionType.ERROR || options.warnings2errors) {
+            errors.add(new KEMException(exception, ExceptionType.ERROR));
+        } else {
+            registerInternal(exception, false);
+        }
+    }
+
+
     private void registerInternal(KException exception, boolean _throw) {
-        if (!options.warnings.includesExceptionType(exception.type))
+        if (!options.includesExceptionType(exception.type))
             return;
         if (_throw && (exception.type == ExceptionType.ERROR || options.warnings2errors)) {
             throw new KEMException(exception, ExceptionType.ERROR);
@@ -117,8 +132,10 @@ public class KExceptionManager {
     }
 
     public void print() {
-        Collections.sort(exceptions, (arg0, arg1) ->
-                arg0.toString(options.verbose).compareTo(arg1.toString(options.verbose)));
+        Collections.sort(exceptions,
+            Comparator.comparing(KException::getSource, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(KException::getLocation, Comparator.nullsLast(Comparator.naturalOrder()))
+            .thenComparing(e -> e.toString(options.verbose)));
         KException last = null;
         synchronized (exceptions) {
             for (KException e : exceptions) {
@@ -131,11 +148,19 @@ public class KExceptionManager {
                 System.err.println(msg);
                 last = e;
             }
+            exceptions.clear();
         }
     }
 
     public void registerThrown(KEMException e) {
-        exceptions.add(e.exception);
+        KException exception = e.exception;
+        if (!options.includesExceptionType(exception.type))
+            return;
+        if (options.warnings2errors) {
+            exceptions.add(new KException(ExceptionType.ERROR, exception.exceptionGroup, exception.getMessage(), exception.getSource(), exception.getLocation(), exception.getException()));
+        } else {
+            exceptions.add(exception);
+        }
     }
 
     public List<KException> getExceptions() {
